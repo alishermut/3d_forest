@@ -14,9 +14,11 @@ import {
 // package (same source as the flowers). Rapier gets a ball collider per
 // rock via the exported list.
 
+// Phase 16: only the forest grew with the 1200 m world — the mountain range
+// and the lake shoreline kept their size, so their counts stay.
 const MOUNTAIN_COUNT = 140;
 const SHORE_COUNT = 45;
-const FOREST_COUNT = 35;
+const FOREST_COUNT = 80;
 
 // {x, y, z, r} consumed by physics.js
 export const rockColliders = [];

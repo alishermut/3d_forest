@@ -10,7 +10,7 @@ import {
   SPAWN,
 } from './terrain.js';
 
-const TREE_COUNT = 2200;     // ~4x the old world area (Phase 11)
+const TREE_COUNT = 5000;     // 1200 m world (Phase 16): same density as 2200/800 m
 const MIN_DIST = 5.5;        // closest two trees can stand (m)
 const SPAWN_CLEARING = 13;   // tree-free radius around the player spawn
 
@@ -37,8 +37,8 @@ function mulberry32(seed) {
 // InstancedMesh per (variant, cell). Cells get real bounding spheres so
 // three.js frustum-culls them, plus a distance cutoff — beyond ~150 m the
 // fog has fully swallowed everything, so drawing it is pure waste.
-const CELL_SIZE = 66;   // ~12x12 cells over the ±400 m world
-const GRID_HALF = 400;
+const CELL_SIZE = 66;   // ~18x18 cells over the ±600 m world (Phase 16)
+const GRID_HALF = 600;
 // At FogExp2 density 0.026, transmittance at 110 m is ~0.1% — cells beyond
 // this are invisible, not "barely visible".
 const VIEW_CUTOFF = 110;
@@ -287,12 +287,13 @@ function createFallenLogs(scene, rng) {
   const logGeo = new THREE.CylinderGeometry(0.22, 0.32, 5.5, 9);
   logGeo.rotateZ(Math.PI / 2); // lie on the ground along local X
 
-  // 14 forest logs + 5 shore logs lying roughly parallel to the waterline.
+  // 31 forest logs (scaled with the Phase 16 forest area) + 5 shore logs
+  // lying roughly parallel to the waterline (the lake didn't grow).
   let placed = 0;
   let tries = 0;
-  while (placed < 19 && tries < 400) {
+  while (placed < 36 && tries < 900) {
     tries++;
-    const shoreLog = placed >= 14;
+    const shoreLog = placed >= 31;
     let ang = rng() * Math.PI * 2;
     let rad = shoreLog
       ? 52 + rng() * 38

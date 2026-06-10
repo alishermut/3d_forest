@@ -570,16 +570,28 @@ its key; panel readable but unobtrusive during play.
 
 **Goal:** 1200 m world without tripling load time.
 
-- [ ] `WORLD_SIZE` 800 → 1200, `WORLD_RADIUS` 380 → 560
-- [ ] Terrain mesh + physics heightfield 512² → 768²; sample `getHeight` over
-      ONE shared grid reused by the terrain mesh and the Rapier heightfield
-      (currently two separate passes; the water height bake no longer exists —
-      water depth is per-vertex analytic since the 2026-06-11 water pass)
-- [ ] Re-tune scatter counts (trees ~2200 → ~5000, logs/rocks proportional)
-- [ ] Heightfield truth-test still passes; load time comparable to today
+- [x] `WORLD_SIZE` 800 → 1200, `WORLD_RADIUS` 380 → 560
+- [x] Terrain mesh + physics heightfield 512² → 768² (same 1.56 m density);
+      `getHeightGrid()` in terrain.js samples `getHeight` ONCE — the render
+      mesh reads vertex heights AND derives the rock-blend slope from grid
+      finite differences (was 4 extra getHeight calls per vertex), physics
+      transposes the same array into Rapier's column-major layout. Net: the
+      1200 m world samples FEWER heights at load than the 800 m one did
+- [x] Scatter re-tuned by the area that actually grew (the forest — lake and
+      east range kept their size): trees 2200 → 5000 (GRID_HALF 600, ~18×18
+      cells), forest logs 14 → 31 (shore 5 stays), forest rocks 35 → 80
+      (mountain 140 / shore 45 stay), flower clumps 90 → 200/type
+- [x] Heightfield truth-test passes: 6/6 raycasts within 1.5 cm of analytic;
+      load comparable; camera.far kept at 500 (the 560 m rim stays past the
+      draw distance — no horizon pop; Phase 17 owns the far-plane question)
+- NOTE for Phase 17: the old east range mask (`smoothstep(185, 330, x)`)
+  never falls off eastward, so the enlarged world's east side is currently a
+  ~350 m-deep mountain belt out to the rim — removed anyway by Phase 17
 
 **CHECKPOINT 16:** walk/fly to every edge; perf budget holds (per-cell culling
-math scales with view distance, not world size).
+math scales with view distance, not world size). Verified remotely: spawn
+view unchanged, east edge + aerial render correctly, no console errors —
+walk/fly feel is the user's checkpoint.
 
 ## Phase 17 — Western Mountain Range (replaces east range)
 
@@ -847,7 +859,7 @@ the one-line inert switch + bezier helpers for this.
 | Phase | Status |
 |-------|--------|
 | 15 — Controls panel | done — awaiting user check |
-| 16 — World 1200 m + shared grid | planned |
+| 16 — World 1200 m + shared grid | done — awaiting user check |
 | 17 — Western range | planned |
 | 18 — Biomes + wheat terrain | planned |
 | 19 — Wheat rendering | planned |

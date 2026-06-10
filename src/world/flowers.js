@@ -17,7 +17,7 @@ import { WATER_EXCLUDED_LAYER } from './water.js';
 // leaves, petals) — all submeshes are merged into one geometry with
 // material groups so a single InstancedMesh draws the complete flower.
 
-const CLUMPS_PER_TYPE = 90;
+const CLUMPS_PER_TYPE = 200; // Phase 16: scaled with the 1200 m forest area
 const CLUMPS_NEAR_SPAWN = 3;   // guaranteed findable ones, per type
 const FLOWERS_PER_CLUMP_MAX = 9;
 const FLOWER_HEIGHT = 0.32;    // meters after normalization
