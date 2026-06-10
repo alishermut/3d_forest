@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Forest</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    body.playing, body.playing * { cursor: none !important; }
+    #app canvas { display: block; }
+
+    #crosshair {
+      position: fixed; left: 50%; top: 50%;
+      width: 4px; height: 4px; margin: -2px 0 0 -2px;
+      border-radius: 50%; background: rgba(255, 255, 255, 0.6);
+      pointer-events: none; z-index: 10;
+    }
+
+    #prompt {
+      position: fixed; inset: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; cursor: pointer;
+      color: #dce5dc; font: 16px/1.6 system-ui, sans-serif;
+      background: rgba(8, 12, 10, 0.55);
+      letter-spacing: 0.04em;
+    }
+    #prompt h1 { font-size: 28px; font-weight: 600; margin: 0 0 8px; }
+    #prompt p { margin: 0; opacity: 0.7; font-size: 14px; }
+    #prompt.hidden { display: none; }
+
+    #stats {
+      position: fixed; top: 8px; left: 8px; z-index: 30;
+      color: #cfe3cf; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; white-space: pre; pointer-events: none;
+    }
+    #stats.hidden { display: none; }
+
+    #controls {
+      position: fixed; top: 104px; left: 8px; z-index: 30;
+      color: #cfe3cf; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; white-space: pre; pointer-events: none;
+    }
+    #controls.hidden { display: none; }
+    #controls b { font-weight: 600; }
+    #controls .on { color: #9fdd9f; }
+    #controls .off { color: #8a8a8a; }
+    #controls .dim { color: #93a393; }
+
+    #mode {
+      position: fixed; top: 8px; right: 8px; z-index: 30;
+      color: #ffe9b8; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; pointer-events: none; letter-spacing: 0.12em;
+    }
+    #mode.hidden { display: none; }
+
+    #underwater {
+      position: fixed; inset: 0; z-index: 5; pointer-events: none;
+      background: rgba(24, 52, 60, 0.35);
+    }
+    #underwater.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="crosshair"></div>
+  <div id="prompt">
+    <div>
+      <h1>DEEP FOREST</h1>
+      <p>Click to enter &middot; WASD walk &middot; F1 controls panel</p>
+    </div>
+  </div>
+  <div id="stats"></div>
+  <div id="controls"></div>
+  <div id="mode" class="hidden">FLY</div>
+  <div id="underwater" class="hidden"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
