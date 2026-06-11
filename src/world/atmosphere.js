@@ -82,7 +82,7 @@ export function createAtmosphere(scene) {
   // --- Sky dome: horizon blends into the fog color so the world edge is
   // invisible; warm glow + disc where the sun sits.
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(440, 32, 16),
+    new THREE.SphereGeometry(650, 32, 16), // inside the 700 far plane (Phase 17)
     new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,

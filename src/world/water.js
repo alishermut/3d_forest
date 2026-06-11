@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getHeight, LAKE_WATER_Y } from './terrain.js';
+import { beginWaterPrePass, endWaterPrePass } from './trees.js';
 import {
   sunDirection,
   FOG_COLOR,
@@ -625,6 +626,8 @@ export function prepareWater(renderer, scene, camera) {
 
   const lakeVisible = lakeMesh.visible;
   lakeMesh.visible = false;
+  // Distant tree cells contribute nothing to half-res water targets.
+  beginWaterPrePass(camera.position);
 
   // 1) Refraction + depth: the scene with no water, from the main camera.
   renderer.setRenderTarget(refractionRT);
@@ -634,6 +637,7 @@ export function prepareWater(renderer, scene, camera) {
   // 2) Planar reflection for the lake.
   renderReflection(renderer, scene, camera);
 
+  endWaterPrePass();
   lakeMesh.visible = lakeVisible;
   camera.layers.mask = prevLayerMask;
   renderer.shadowMap.autoUpdate = prevShadowAuto;

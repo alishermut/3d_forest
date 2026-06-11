@@ -57,7 +57,7 @@ function pickSpot(cx, cz) {
     // cliffs, or high on the mountains.
     if (getRiverDistance(x, z).d < 9) continue;
     const h = getHeight(x, z);
-    if (h < -1.2 || h > 30 || getSlope(x, z) > 0.7) continue;
+    if (h < -1.2 || h > 14 || getSlope(x, z) > 0.7) continue; // Phase 17 treeline
 
     const density = THREE.MathUtils.smoothstep(getTint(x, z), 0.42, 0.72);
     if (rng() < density * 0.95 + 0.02) return { x, z };

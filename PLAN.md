@@ -511,6 +511,19 @@ moment lands, the arc ships.
   overlap with the lake sheet drew X-wedges + moiré. One-line inert switch in
   getRiverDistance (terrain.js) disables carve/masks/water-level everywhere;
   river mesh deleted from water.js; bezier helpers kept for Phase 37
+- 2026-06-11 (post-Phase-16 perf batch, after user hit ~20 fps aloft): the
+  1200 m world fills the entire 500 m far plane in every direction, so
+  worst-case views (flying high, long sightlines) got much heavier. Three
+  quality-free fixes shipped: (1) LEAF LOD — leaves are 77% of a tree's
+  tris; cells beyond 140 m swap to a sparse leaf geometry (every 3rd card,
+  scaled 1.75x, built by slicing the indexed quads) — a reference-only
+  geometry swap per cell; (2) water pre-passes cull tree cells beyond 200 m
+  (beginWaterPrePass/endWaterPrePass brackets in prepareWater); (3) terrain
+  chunked 8x8 with seam-free GRID normals (central differences — identical
+  for border verts of adjacent chunks; computeVertexNormals would crease).
+  Measured at the same aerial view: 113M → 52M tris, 19 → 41 fps. Remaining
+  levers: finite fog-off cutoff (~360 m, visible pop tradeoff) and Phase 35
+  impostors (the endgame)
 
 ---
 
@@ -597,17 +610,31 @@ walk/fly feel is the user's checkpoint.
 
 **Goal:** the v3 map's massif — bare rock, runs off-map, natural taper.
 
-- [ ] Ridge band in POLAR coordinates: amplitude peaks at the west rim and
-      continues past `WORLD_RADIUS`; inner falloff noise-warped (spurs and
-      valleys cut into the plain — no clean curve, no sharp "horns")
-- [ ] Tapered ends: low-amplitude ridged noise persists past the main falloff
-      + discrete foothill bumps shrinking into forest
-- [ ] Remove the old east range from `getHeight`; east becomes rolling forest
-- [ ] Treeline on the range ~15 m (bare rock above); snow blend above ~55 m in
-      the terrain shader (slope-masked)
+- [x] Ridge band in POLAR coordinates (theta from due west): amplitude rises
+      from a noise-warped inner edge (rIn = 395±55 per angle -> spurs and
+      valleys, no clean curve) and keeps rising past `WORLD_RADIUS` to the
+      mesh edge, so the massif never visibly ends; peaks ~80-105 m; ragged
+      noise-warped angular taper (full ±50 deg, fading to ±80 deg)
+- [x] Tapered ends: low ridged skirt spills inward of the main wall +
+      4 discrete gaussian foothills (FOOTHILLS table) shrinking into forest
+- [x] Old east range removed — east is rolling forest to the rim (verified
+      h(520,0) = -2.2)
+- [x] Treeline 15 m (trees thin from 11 m; grass capped at 14 m); snow via a
+      per-vertex `aSnow` attribute from the shared grid (h 52-64 ramp,
+      slope-masked so cliffs shed it), blended in the terrain shader
+- [x] camera.far 500 -> 700 + sky dome 440 -> 650 so the massif is visible
+      from mid-map (affordable post leaf-LOD/chunking)
+- NOTE: crest silhouettes show some sawtooth serration up close (ridged
+  noise creases on the 1.56 m grid) — acceptable at gameplay distances,
+  candidate polish for a later pass
+- GOTCHA hit during build: getHeight already had `const r` (river block) —
+  the new range code's `const r` was a SyntaxError that silently killed the
+  whole app (blank no-__renderer state). Named `dist` instead
 
 **CHECKPOINT 17:** from the wheat-plain site the range reads as one continuous
 massif with no visible end; climbing west you hit real cliffs (natural border).
+Verified remotely (wide + crest views, snow caps, east forest check, truth
+test 6/6); the climb feel is the user's checkpoint.
 
 ## Phase 18 — Biome Module + Wheat Plain Terrain
 
@@ -860,7 +887,7 @@ the one-line inert switch + bezier helpers for this.
 |-------|--------|
 | 15 — Controls panel | done — awaiting user check |
 | 16 — World 1200 m + shared grid | done — awaiting user check |
-| 17 — Western range | planned |
+| 17 — Western range | done — awaiting user check |
 | 18 — Biomes + wheat terrain | planned |
 | 19 — Wheat rendering | planned |
 | 20 — Natural lake + island | planned |

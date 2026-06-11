@@ -33,6 +33,16 @@ function mulberry32(seed) {
 const heightNoise = new SimplexNoise({ random: mulberry32(1337) });
 const tintNoise = new SimplexNoise({ random: mulberry32(9001) });
 
+// Discrete foothill bumps (Phase 17): hand-placed gaussian hills scattered
+// off the western range — inner spurs poking into the lowland and lone
+// hills near the tapered north/south ends. [x, z, height, radius]
+const FOOTHILLS = [
+  [-360, 140, 26, 58],
+  [-330, -190, 22, 52],
+  [-150, 420, 18, 48],
+  [-140, -430, 16, 44],
+];
+
 function smoothstep(edge0, edge1, x) {
   const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
@@ -102,13 +112,40 @@ export function getHeight(x, z) {
   h += heightNoise.noise(x / 45, z / 45) * 1.5;
   h += heightNoise.noise(x / 12, z / 12) * 0.3;
 
-  // Mountain range along the east side: ridged noise (1 - |n|) for sharp
-  // crests, big wavelength for the main ridge + smaller spurs.
-  const m = smoothstep(185, 330, x);
-  if (m > 0) {
-    const ridge1 = 1 - Math.abs(heightNoise.noise(x / 175, z / 175));
-    const ridge2 = 1 - Math.abs(heightNoise.noise(x / 70 + 9.7, z / 70 - 3.1));
-    h += m * (Math.pow(ridge1, 1.6) * 72 + ridge2 * 16 + 12);
+  // Western mountain range (Phase 17, replaces the old east range): a polar
+  // ridge band hugging the west rim. Amplitude keeps rising past the world
+  // boundary to the mesh edge, so from inside the massif never visibly ends.
+  // Ridged noise (1 - |n|) for sharp crests, like the old range.
+  const dist = Math.hypot(x, z);
+  if (dist > 290) {
+    // Angle from due west (0 = straight west, grows toward N/S).
+    const theta = Math.atan2(z, -x);
+    // Ragged angular taper: full massif within ~±50 deg, noise-warped fade
+    // to ~±80 deg — the ends crumble into foothills, no sharp "horns".
+    const edgeWarp = heightNoise.noise(theta * 2.3 + 7.1, dist / 240) * 0.25;
+    const aMask = 1 - smoothstep(0.85, 1.4, Math.abs(theta) + edgeWarp);
+    if (aMask > 0) {
+      // Inner edge warped per angle -> rocky spurs and valleys cut into the
+      // lowland instead of a clean circular wall.
+      const rIn = 395 + heightNoise.noise(theta * 3.1 + 3.3, 0.5) * 55;
+      const radial = smoothstep(rIn, rIn + 110, dist);
+      const ridge1 = 1 - Math.abs(heightNoise.noise(x / 170, z / 170));
+      const ridge2 = 1 - Math.abs(heightNoise.noise(x / 68 + 9.7, z / 68 - 3.1));
+      const a = aMask * radial;
+      h += a * (Math.pow(ridge1, 1.6) * 80 + ridge2 * 14 + 12);
+      // Low ridged skirt spilling inward of the main wall.
+      h += aMask * (1 - radial) * smoothstep(rIn - 90, rIn, dist) * ridge2 * 9;
+    }
+  }
+
+  // Discrete foothills scattered off the range — the taper into the forest.
+  if (x < -100) {
+    for (const [fx, fz, fh, fr] of FOOTHILLS) {
+      const dx = x - fx;
+      const dz = z - fz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < fr * fr * 4) h += fh * Math.exp(-d2 / (fr * fr));
+    }
   }
 
   // Lake basin: a guaranteed dry RIM ring first (no natural dips below the
@@ -222,49 +259,21 @@ export function getTint(x, z) {
 export function createTerrain({ map, normalMap, armMap, rockMap }) {
   const grid = getHeightGrid();
   const n = grid.n;
-  const geometry = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, n, n);
-  geometry.rotateX(-Math.PI / 2);
 
-  const pos = geometry.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const rockBlend = new Float32Array(pos.count);
+  // Chunked terrain (perf batch, 2026-06-11): 8x8 chunks instead of one
+  // world-spanning mesh, so frustum culling can drop what's behind/beside
+  // the camera (a single 768² mesh was ~1.2 M tris drawn in EVERY pass).
+  // Normals come from grid central differences — identical math for the
+  // border vertices of adjacent chunks, so the seams are invisible
+  // (computeVertexNormals per chunk would crease them).
+  const CHUNKS = 8;
+  const seg = n / CHUNKS; // 96 segments per chunk
+  const vw = seg + 1;
 
-  // Grid lookups by lattice index (robust to the plane's vertex ordering).
   const gh = (ix, iz) =>
     grid.heights[
       THREE.MathUtils.clamp(iz, 0, n) * (n + 1) + THREE.MathUtils.clamp(ix, 0, n)
     ];
-
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const ix = Math.round((x / WORLD_SIZE + 0.5) * n);
-    const iz = Math.round((z / WORLD_SIZE + 0.5) * n);
-    const h = gh(ix, iz);
-    pos.setY(i, h);
-
-    // Macro tint: darker earthy patches vs lighter mossy ones.
-    const t = getTint(x, z);
-    const shade = 0.72 + t * 0.42;
-    colors[i * 3 + 0] = shade * 0.98;
-    colors[i * 3 + 1] = shade;
-    colors[i * 3 + 2] = shade * 0.92;
-
-    // Rock shows where it's steep or high (cliffs, upper mountains).
-    // Slope from grid central differences — no extra getHeight calls.
-    const slope =
-      Math.hypot(gh(ix + 1, iz) - gh(ix - 1, iz), gh(ix, iz + 1) - gh(ix, iz - 1)) /
-      (2 * grid.step);
-    rockBlend[i] = THREE.MathUtils.clamp(
-      smoothstep(0.5, 0.95, slope) + smoothstep(26, 48, h) * 0.85,
-      0,
-      1
-    );
-  }
-
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute('aRock', new THREE.BufferAttribute(rockBlend, 1));
-  geometry.computeVertexNormals();
 
   const repeat = WORLD_SIZE / 4; // one forest-floor tile ≈ 4 m
   for (const tex of [map, normalMap, armMap]) {
@@ -293,18 +302,22 @@ export function createTerrain({ map, normalMap, armMap, rockMap }) {
     shader.vertexShader =
       `
       attribute float aRock;
+      attribute float aSnow;
       varying float vRock;
+      varying float vSnow;
       ` +
       shader.vertexShader.replace(
         '#include <uv_vertex>',
         `#include <uv_vertex>
-        vRock = aRock;`
+        vRock = aRock;
+        vSnow = aSnow;`
       );
 
     shader.fragmentShader =
       `
       uniform sampler2D rockMap;
       varying float vRock;
+      varying float vSnow;
       ` +
       shader.fragmentShader.replace(
         '#include <map_fragment>',
@@ -312,6 +325,8 @@ export function createTerrain({ map, normalMap, armMap, rockMap }) {
         vec4 floorColor = texture2D(map, vMapUv);
         vec4 rockColor = texture2D(rockMap, vMapUv * 0.2);
         diffuseColor *= mix(floorColor, rockColor, vRock);
+        // Snow above the Phase 17 range's snow line (slope-masked attribute).
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.91, 0.93, 0.96), vSnow);
         #ifdef USE_FOG
         // Wet shoreline: darken a band just above/below the lake waterline
         // (-1.5) so the beach reads as a beach, not a second water sheet.
@@ -326,8 +341,95 @@ export function createTerrain({ map, normalMap, armMap, rockMap }) {
     material.userData.shader = shader;
   };
 
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.receiveShadow = true;
-  mesh.name = 'terrain';
-  return mesh;
+  // --- Build the 8x8 chunk meshes (shared material, world-space vertices).
+  const group = new THREE.Group();
+  group.name = 'terrain';
+
+  for (let ccz = 0; ccz < CHUNKS; ccz++) {
+    for (let ccx = 0; ccx < CHUNKS; ccx++) {
+      const positions = new Float32Array(vw * vw * 3);
+      const normals = new Float32Array(vw * vw * 3);
+      const uvs = new Float32Array(vw * vw * 2);
+      const colors = new Float32Array(vw * vw * 3);
+      const rockBlend = new Float32Array(vw * vw);
+      const snowBlend = new Float32Array(vw * vw);
+      const indices = new Uint32Array(seg * seg * 6);
+
+      for (let lz = 0; lz < vw; lz++) {
+        const giz = ccz * seg + lz;
+        const z = (giz / n - 0.5) * WORLD_SIZE;
+        for (let lx = 0; lx < vw; lx++) {
+          const gix = ccx * seg + lx;
+          const x = (gix / n - 0.5) * WORLD_SIZE;
+          const v = lz * vw + lx;
+          const h = gh(gix, giz);
+
+          positions[v * 3 + 0] = x;
+          positions[v * 3 + 1] = h;
+          positions[v * 3 + 2] = z;
+
+          // Smooth normal from grid central differences (seam-free).
+          const dhdx = (gh(gix + 1, giz) - gh(gix - 1, giz)) / (2 * grid.step);
+          const dhdz = (gh(gix, giz + 1) - gh(gix, giz - 1)) / (2 * grid.step);
+          const invLen = 1 / Math.hypot(dhdx, 1, dhdz);
+          normals[v * 3 + 0] = -dhdx * invLen;
+          normals[v * 3 + 1] = invLen;
+          normals[v * 3 + 2] = -dhdz * invLen;
+
+          // Continuous global UVs (the textures tile via repeat).
+          uvs[v * 2 + 0] = gix / n;
+          uvs[v * 2 + 1] = 1 - giz / n;
+
+          // Macro tint: darker earthy patches vs lighter mossy ones.
+          const t = getTint(x, z);
+          const shade = 0.72 + t * 0.42;
+          colors[v * 3 + 0] = shade * 0.98;
+          colors[v * 3 + 1] = shade;
+          colors[v * 3 + 2] = shade * 0.92;
+
+          // Rock shows where it's steep or high (cliffs, upper mountains).
+          const slope = Math.hypot(dhdx, dhdz);
+          rockBlend[v] = THREE.MathUtils.clamp(
+            smoothstep(0.5, 0.95, slope) + smoothstep(26, 48, h) * 0.85,
+            0,
+            1
+          );
+
+          // Snow (Phase 17): settles on flat-ish faces above ~55 m; cliffs
+          // shed it. Terrain noise keeps the snow line naturally irregular.
+          snowBlend[v] =
+            smoothstep(52, 64, h) * (1 - smoothstep(0.55, 0.85, slope));
+        }
+      }
+
+      let ii = 0;
+      for (let lz = 0; lz < seg; lz++) {
+        for (let lx = 0; lx < seg; lx++) {
+          const a = lz * vw + lx;
+          const b = a + 1;
+          const c = a + vw;
+          const d = c + 1;
+          indices[ii++] = a; indices[ii++] = c; indices[ii++] = b;
+          indices[ii++] = b; indices[ii++] = c; indices[ii++] = d;
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geometry.setAttribute('aRock', new THREE.BufferAttribute(rockBlend, 1));
+      geometry.setAttribute('aSnow', new THREE.BufferAttribute(snowBlend, 1));
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      geometry.computeBoundingSphere();
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.receiveShadow = true;
+      mesh.name = 'terrain';
+      group.add(mesh);
+    }
+  }
+
+  return group;
 }

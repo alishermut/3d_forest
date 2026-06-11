@@ -43,7 +43,17 @@ const GRID_HALF = 600;
 // this are invisible, not "barely visible".
 const VIEW_CUTOFF = 110;
 
-const cellMeshes = []; // {center, radius, meshes: [branchesIM, leavesIM]}
+const cellMeshes = []; // {center, radius, meshes: [branchesIM, leavesIM], leafFull, leafSparse}
+
+// Leaf LOD (perf batch, 2026-06-11): leaves are ~77% of a tree's triangles.
+// Cells beyond this distance swap to a sparse leaf geometry (1 of every 3
+// cards, scaled up to keep canopy coverage) — ~2.1x fewer tree triangles at
+// distance, invisible through the atmospheric haze.
+const LEAF_LOD_DIST = 140;
+
+// Water pre-passes (refraction/reflection) gain nothing from trees beyond
+// this — they render half-res and heavily distorted/mirrored.
+const PREPASS_DIST = 200;
 
 // Collider data consumed by core/physics.js (Phase 8).
 export const treeColliders = []; // trunks: {x, z, r}
@@ -95,6 +105,67 @@ function patchLeafMaterialForInstancing(mat) {
   mat.needsUpdate = true;
 }
 
+// Build the sparse leaf geometry: keep every Nth leaf card, scaled up about
+// its centroid so the canopy keeps its visual coverage. ez-tree leaves are
+// indexed quads (4 unique verts + 6 indices per card, no sharing across
+// cards) — verified live; vert ids are derived from the index so any
+// per-card layout works.
+function buildSparseLeaves(geo, keepEvery = 3, scale = 1.75) {
+  const pos = geo.attributes.position;
+  const norm = geo.attributes.normal;
+  const uv = geo.attributes.uv;
+  const index = geo.index;
+  const quadCount = index.count / 6;
+  const keptMax = Math.ceil(quadCount / keepEvery);
+
+  const p = new Float32Array(keptMax * 4 * 3);
+  const nr = new Float32Array(keptMax * 4 * 3);
+  const u = new Float32Array(keptMax * 4 * 2);
+  const idx = new Uint32Array(keptMax * 6);
+
+  let q = 0;
+  const local = new Map();
+  for (let i = 0; i < quadCount; i += keepEvery) {
+    // Unique source verts of this card, in first-seen order.
+    local.clear();
+    for (let k = 0; k < 6; k++) {
+      const v = index.getX(i * 6 + k);
+      if (!local.has(v)) local.set(v, local.size);
+    }
+    if (local.size !== 4) continue; // not a quad — skip defensively
+
+    let cx = 0, cy = 0, cz = 0;
+    for (const v of local.keys()) {
+      cx += pos.getX(v); cy += pos.getY(v); cz += pos.getZ(v);
+    }
+    cx /= 4; cy /= 4; cz /= 4;
+
+    const base = q * 4;
+    for (const [v, li] of local) {
+      const o = base + li;
+      p[o * 3 + 0] = cx + (pos.getX(v) - cx) * scale;
+      p[o * 3 + 1] = cy + (pos.getY(v) - cy) * scale;
+      p[o * 3 + 2] = cz + (pos.getZ(v) - cz) * scale;
+      nr[o * 3 + 0] = norm.getX(v);
+      nr[o * 3 + 1] = norm.getY(v);
+      nr[o * 3 + 2] = norm.getZ(v);
+      u[o * 2 + 0] = uv.getX(v);
+      u[o * 2 + 1] = uv.getY(v);
+    }
+    for (let k = 0; k < 6; k++) {
+      idx[q * 6 + k] = base + local.get(index.getX(i * 6 + k));
+    }
+    q++;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(p.subarray(0, q * 12), 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nr.subarray(0, q * 12), 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(u.subarray(0, q * 8), 2));
+  out.setIndex(new THREE.BufferAttribute(idx.subarray(0, q * 6), 1));
+  return out;
+}
+
 export function createTrees(scene) {
   const rng = mulberry32(7777);
   const densityNoise = new SimplexNoise({ random: mulberry32(4242) });
@@ -119,8 +190,8 @@ export function createTrees(scene) {
     if (getRiverDistance(x, z).d < 13) continue;
     const h = getHeight(x, z);
     if (h < -0.4) continue;
-    if (h > 40) continue;
-    if (h > 28 && rng() > 0.35) continue; // sparse near the treeline
+    if (h > 15) continue; // Phase 17 treeline — the range above is bare rock
+    if (h > 11 && rng() > 0.35) continue; // sparse near the treeline
     if (getSlope(x, z) > 0.65) continue;  // too steep for roots
 
     // Density noise carves natural clearings and groves.
@@ -191,6 +262,9 @@ export function createTrees(scene) {
     patchLeafMaterialForInstancing(tree.leavesMesh.material);
     leafMaterials.push(tree.leavesMesh.material);
 
+    const leafFull = tree.leavesMesh.geometry;
+    const leafSparse = buildSparseLeaves(leafFull);
+
     // Group this variant's points into grid cells.
     const cells = new Map();
     for (const p of variant.points) {
@@ -250,6 +324,8 @@ export function createTrees(scene) {
         center: branchesIM.boundingSphere.center,
         radius: Math.max(branchesIM.boundingSphere.radius, leavesIM.boundingSphere.radius),
         meshes: [branchesIM, leavesIM],
+        leafFull,
+        leafSparse,
       });
     }
   }
@@ -271,11 +347,50 @@ export function updateTrees(elapsedTime, cameraPos, viewCutoff = VIEW_CUTOFF) {
   for (const cell of cellMeshes) {
     const dx = cell.center.x - cameraPos.x;
     const dz = cell.center.z - cameraPos.z;
+    const d2 = dx * dx + dz * dz;
     const limit = viewCutoff + cell.radius;
-    const visible = dx * dx + dz * dz < limit * limit;
+    const visible = d2 < limit * limit;
     cell.meshes[0].visible = visible;
     cell.meshes[1].visible = visible;
+
+    // Leaf LOD: distant cells render the sparse leaf set (geometry swap is
+    // just a reference change; instance matrices live on the mesh).
+    if (visible) {
+      const lodLimit = LEAF_LOD_DIST + cell.radius;
+      const target = d2 > lodLimit * lodLimit ? cell.leafSparse : cell.leafFull;
+      if (cell.meshes[1].geometry !== target) cell.meshes[1].geometry = target;
+    }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Water pre-pass culling: prepareWater (water.js) brackets its refraction +
+// reflection renders with these — distant tree cells contribute nothing to
+// a half-res distorted/mirrored image. Restores exactly what it hid, so the
+// state set by updateTrees above survives.
+// ---------------------------------------------------------------------------
+const _prePassHidden = [];
+
+export function beginWaterPrePass(cameraPos) {
+  for (const cell of cellMeshes) {
+    if (!cell.meshes[0].visible) continue;
+    const dx = cell.center.x - cameraPos.x;
+    const dz = cell.center.z - cameraPos.z;
+    const limit = PREPASS_DIST + cell.radius;
+    if (dx * dx + dz * dz > limit * limit) {
+      cell.meshes[0].visible = false;
+      cell.meshes[1].visible = false;
+      _prePassHidden.push(cell);
+    }
+  }
+}
+
+export function endWaterPrePass() {
+  for (const cell of _prePassHidden) {
+    cell.meshes[0].visible = true;
+    cell.meshes[1].visible = true;
+  }
+  _prePassHidden.length = 0;
 }
 
 function createFallenLogs(scene, rng) {

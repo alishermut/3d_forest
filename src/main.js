@@ -55,11 +55,14 @@ window.__game = { scene: null, camera: null }; // filled below
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
+// far 700 (Phase 17): the western massif crests near the 560 m rim — at 500
+// the far plane sliced its peaks from mid-map. Affordable since the perf
+// batch (leaf LOD + chunked terrain) trimmed the distant-geometry cost.
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
-  500
+  700
 );
 window.__game.scene = scene;
 window.__game.camera = camera;
