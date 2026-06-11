@@ -7,7 +7,13 @@ import { Hud } from './core/hud.js';
 import { loadTexture } from './core/assets.js';
 import { PlayerControls } from './player/controls.js';
 import { getHeight, createTerrain, SPAWN } from './world/terrain.js';
-import { createTrees, updateTrees, treeColliders, logColliders } from './world/trees.js';
+import {
+  createTrees,
+  updateTrees,
+  treeColliders,
+  logColliders,
+  worldTreeFlares,
+} from './world/trees.js';
 import {
   initPhysics,
   movePlayer,
@@ -25,16 +31,36 @@ import {
   WATER_EXCLUDED_LAYER,
 } from './world/water.js';
 import { createRocks, rockColliders } from './world/rocks.js';
-import { createAtmosphere, sunDirection, FOG_DENSITY } from './world/atmosphere.js';
+import {
+  createAtmosphere,
+  sunDirection,
+  FOG_DENSITY,
+  FOG_COLOR,
+  setTimeOfDay,
+  getTimeOfDay,
+  getExposure,
+} from './world/atmosphere.js';
 import { createGrass, updateGrass } from './world/grass.js';
+import { createWheat, updateWheat } from './world/wheat.js';
 import { createFlowers } from './world/flowers.js';
+import { createInsects, updateInsects } from './world/insects.js';
+import { createBirds, updateBirds, enableBirdCalls } from './world/birds.js';
+import { createFireflies, updateFireflies } from './world/fireflies.js';
+import { createFish, updateFish } from './world/fish.js';
+import { createAnimals, updateAnimals } from './world/animals.js';
 import { createDust, updateDust } from './world/dust.js';
+import { WeaponSystem } from './weapons/weapons.js';
 
 // ---------------------------------------------------------------------------
 // Renderer
 // ---------------------------------------------------------------------------
+// antialias: false (perf batch 2026-06-11) — the composer renders into its
+// own HalfFloat buffers and the canvas only ever receives the final
+// fullscreen quad; SMAA (in the bloom EffectPass) does the antialiasing.
+// With antialias: true the browser still allocates and resolves an MSAA
+// backbuffer for that quad every frame — pure waste at dpr 2.
 const renderer = new THREE.WebGLRenderer({
-  antialias: true,
+  antialias: false,
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -55,17 +81,20 @@ window.__game = { scene: null, camera: null }; // filled below
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
-// far 700 (Phase 17): the western massif crests near the 560 m rim — at 500
-// the far plane sliced its peaks from mid-map. Affordable since the perf
-// batch (leaf LOD + chunked terrain) trimmed the distant-geometry cost.
+// far 900 (Phase 38): the compacted 900 m world fits entirely inside the
+// far plane from anywhere — no horizon/rim pop possible. Affordable because
+// compaction roughly halved the worst-case vertex load.
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
-  700
+  900
 );
 window.__game.scene = scene;
 window.__game.camera = camera;
+// Phase 28 debug: scrub the clock from the console/verification tooling.
+window.__game.setTimeOfDay = setTimeOfDay;
+window.__game.getTimeOfDay = getTimeOfDay;
 // Grass/flowers/dust live on this extra layer so the water pre-passes can
 // drop them; the main camera still renders everything.
 camera.layers.enable(WATER_EXCLUDED_LAYER);
@@ -94,17 +123,27 @@ async function buildWorld() {
   });
   scene.add(terrain);
 
-  createTrees(scene);
+  createTrees(scene, renderer); // renderer: impostor atlas bake (Phase 35)
   createGrass(scene, SPAWN);
+  createWheat(scene);
   createDust(scene);
   createWater(scene, renderer, camera);
-  await Promise.all([createFlowers(scene, SPAWN), createRocks(scene)]);
+  await Promise.all([
+    createFlowers(scene, SPAWN),
+    createRocks(scene, renderer),
+    createFish(scene),
+    createAnimals(scene),
+  ]);
+  createInsects(scene); // after flowers: butterflies anchor to flowerPatches
+  createBirds(scene);
+  createFireflies(scene);
 }
 
 // ---------------------------------------------------------------------------
 // Atmosphere: fog, sky, sun + shadows, god rays
 // ---------------------------------------------------------------------------
 const atmosphere = createAtmosphere(scene);
+window.__game.atmosphere = atmosphere; // debug: drive update() externally
 
 // User preference: fog OFF by default, F7 turns it on.
 let fogEnabled = false;
@@ -220,6 +259,34 @@ window.__passes = { aoPass, godraysPass, bloomPass };
 // below REPORTS its state here instead of poking the DOM itself. F1 = panel.
 const hud = new Hud();
 
+// Phase 28: user's godray intent (the loop ANDs it with daytime).
+let raysUserOn = true;
+function timeLabel() {
+  const h = getTimeOfDay() * 24;
+  const hh = Math.floor(h);
+  const mm = Math.floor((h - hh) * 60);
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+// Phase 30 — day-night transition: N (or clicking the HUD row) tweens
+// timeOfDay through a full cinematic sunset/sunrise, always flowing
+// FORWARD through the cycle (sun sets; next press rides through dawn).
+const CYCLE_DAY_T = 0.35;   // the calibrated morning anchor
+const CYCLE_NIGHT_T = 0.97; // moon high, stars out
+const CYCLE_DURATION = 25;  // seconds
+let cycleTransition = null; // {from, to, elapsed}
+let lastSunUp = true;
+
+function startCycleTransition() {
+  const from = getTimeOfDay();
+  const goingNight = lastSunUp;
+  let to = goingNight ? CYCLE_NIGHT_T : CYCLE_DAY_T;
+  while (to <= from) to += 1; // forward through the wrap
+  cycleTransition = { from, to, elapsed: 0 };
+  hud.set('cycle', goingNight ? '&rarr; NIGHT' : '&rarr; DAY');
+}
+hud.onCycle = startCycleTransition; // HUD row click = same as N
+
 window.addEventListener('keydown', (e) => {
   if (e.code === 'F4') {
     e.preventDefault();
@@ -235,8 +302,23 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F6') {
     e.preventDefault();
-    godraysPass.enabled = !godraysPass.enabled;
-    hud.set('rays', godraysPass.enabled);
+    // User INTENT only — the loop gates the actual pass on sun-up too
+    // (godrays sample the SUN's shadow map, which the moon owns at night).
+    raysUserOn = !raysUserOn;
+    hud.set('rays', raysUserOn);
+  }
+  // Phase 28 debug scrub: [ / ] step timeOfDay (hold for continuous).
+  // Scrubbing cancels a running day-night transition (manual wins).
+  if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+    e.preventDefault();
+    cycleTransition = null;
+    setTimeOfDay(getTimeOfDay() + (e.code === 'BracketLeft' ? -0.004 : 0.004));
+    renderer.shadowMap.needsUpdate = true;
+    hud.set('time', timeLabel());
+  }
+  // Phase 30: the cinematic sunset/sunrise.
+  if (e.code === 'KeyN') {
+    startCycleTransition();
   }
   if (e.code === 'F7') {
     e.preventDefault();
@@ -259,6 +341,10 @@ window.addEventListener('keydown', (e) => {
 // Controls + UI
 // ---------------------------------------------------------------------------
 const player = new PlayerControls(camera, renderer.domElement);
+
+// Combat arc (v4): created in init() AFTER initPhysics — bullets raycast
+// the physics world, so the colliders must exist first.
+let weapons = null;
 
 // Fly mode (Phase 12): sandbox-style spectator. F toggles; leaving fly
 // drops the capsule at the camera's position and gravity takes over.
@@ -295,6 +381,7 @@ player.onLock(() => {
     ambienceStarted = true;
     ambience.play().catch(() => {});
   }
+  enableBirdCalls(); // same user gesture satisfies autoplay rules
 });
 player.onUnlock(() => {
   prompt.classList.remove('hidden');
@@ -356,6 +443,11 @@ function loop() {
   }
   stepPhysics(dt);
 
+  // Weapons (v4): input/state/projectiles/impacts. After movePlayer (camera
+  // is at its final pose for the frame) and after stepPhysics (impulses from
+  // hits land on fresh transforms next step).
+  if (weapons) weapons.update(dt);
+
   // Underwater camera: tint + dense fog while the eye is below the surface.
   const camWaterLevel = getWaterLevel(camera.position.x, camera.position.z);
   const submerged =
@@ -375,26 +467,66 @@ function loop() {
       scene.fog.color.set(0x33555c);
       scene.fog.density = 0.32; // water murk, regardless of the fog toggle
     } else {
-      scene.fog.color.set(0xaebdb6);
       scene.fog.density = fogEnabled ? FOG_DENSITY : 0;
     }
   }
+  // Fog rides the live time-of-day color (Phase 28) unless underwater murk
+  // owns it.
+  if (!submerged) scene.fog.color.copy(FOG_COLOR);
 
   // With fog off there's nothing to hide the distance cutoff — disable it
   // (frustum culling still drops cells behind the camera).
   updateTrees(clock.elapsedTime, camera.position, fogEnabled ? 110 : Infinity);
   updateGrass(clock.elapsedTime, camera.position);
+  updateWheat(clock.elapsedTime, camera.position); // pos: near-field densifier
+  updateInsects(clock.elapsedTime);
+  updateBirds(clock.elapsedTime, dt, camera.position);
+  updateFireflies(clock.elapsedTime);
+  updateFish(clock.elapsedTime, dt, camera.position);
+  updateAnimals(clock.elapsedTime, dt, camera.position);
   updateDust(dt, camera.position);
   updateWater(clock.elapsedTime);
-  if (atmosphere.update(camera, clock.elapsedTime)) {
-    renderer.shadowMap.needsUpdate = true;
+
+  // Phase 30: ride the day-night tween (smoothstep ease over ~25 s).
+  if (cycleTransition) {
+    cycleTransition.elapsed += dt;
+    const p = Math.min(1, cycleTransition.elapsed / CYCLE_DURATION);
+    const ease = p * p * (3 - 2 * p);
+    setTimeOfDay(
+      cycleTransition.from + (cycleTransition.to - cycleTransition.from) * ease
+    );
+    // No unconditional shadow rebuild here (perf batch): the shadow rig
+    // follows the tweening sun in ~0.35° steps inside atmosphere.update,
+    // and sky.moved below triggers the re-render exactly on those steps —
+    // a few times a second instead of every frame for 25 s.
+    hud.set('time', timeLabel());
+    if (p >= 1) cycleTransition = null;
   }
+
+  const sky = atmosphere.update(camera, clock.elapsedTime);
+  if (sky.moved) renderer.shadowMap.needsUpdate = true;
+  if (sky.swapped) {
+    // The casting light changed (sun<->moon): the godrays pass holds a
+    // one-time binding to the SUN's shadow map — rebind when it returns.
+    godraysPass.illumPass.shadowMapSet = false;
+  }
+  // Godrays need the sun's shadow map — gate on daytime AND user intent.
+  godraysPass.enabled = raysUserOn && sky.sunUp;
+  // Exposure curve: bright day, +golden hour, dimmer night.
+  renderer.toneMappingExposure = getExposure();
+  // Phase 30: HUD cycle state (DAY / NIGHT / transitioning).
+  lastSunUp = sky.sunUp;
+  if (!cycleTransition) hud.set('cycle', sky.sunUp ? 'DAY' : 'NIGHT');
 
   // Water reflection + refraction/depth pre-pass (renders the scene without
   // water into off-screen targets) must run before the main composed image.
   prepareWater(renderer, scene, camera);
 
   composer.render(dt);
+  // First-person viewmodel (v4): forward overlay render on top of the
+  // composed frame with a depth clear — the gun never clips into world
+  // geometry and never touches the composer's (fragile) depth pipeline.
+  if (weapons) weapons.renderViewmodel(renderer);
   stats.update(dt);
 }
 
@@ -402,9 +534,11 @@ async function init() {
   await buildWorld();
   await initPhysics(
     scene,
-    { trunks: treeColliders, logs: logColliders, rocks: rockColliders },
+    // World-tree root flares ride the ball-collider path (Phase 39).
+    { trunks: treeColliders, logs: logColliders, rocks: [...rockColliders, ...worldTreeFlares] },
     SPAWN
   );
+  weapons = new WeaponSystem({ scene, camera, player, hud });
   renderer.setAnimationLoop(loop);
 }
 init().catch((e) => {

@@ -61,6 +61,39 @@
       background: rgba(24, 52, 60, 0.35);
     }
     #underwater.hidden { display: none; }
+
+    #ammo {
+      position: fixed; right: 18px; bottom: 14px; z-index: 10;
+      color: #e8e4d8; font: 600 19px/1.2 Consolas, monospace;
+      letter-spacing: 0.08em; pointer-events: none;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Fishing (Phase 51): line-tension bar above the ammo readout. */
+    #tension {
+      position: fixed; right: 18px; bottom: 46px; z-index: 10;
+      width: 170px; height: 9px; pointer-events: none;
+      background: rgba(8, 10, 8, 0.55);
+      border: 1px solid rgba(232, 228, 216, 0.35);
+      border-radius: 4px;
+    }
+    #tension.hidden { display: none; }
+    #tension > div {
+      height: 100%; width: 0%;
+      background: #7fc35a; border-radius: 3px;
+    }
+
+    /* Catch card (Phase 52): brief center-screen banner. */
+    #catchcard {
+      position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%);
+      z-index: 10; pointer-events: none;
+      color: #ffe9b8; font: 700 22px/1.3 Consolas, monospace;
+      letter-spacing: 0.1em; text-align: center;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+      opacity: 0; transition: opacity 220ms ease;
+    }
+    #catchcard.show { opacity: 1; }
+    #catchcard small { font-size: 14px; color: #d8d4c8; display: block; }
   </style>
 </head>
 <body>
@@ -76,6 +109,9 @@
   <div id="controls"></div>
   <div id="mode" class="hidden">FLY</div>
   <div id="underwater" class="hidden"></div>
+  <div id="ammo"></div>
+  <div id="tension" class="hidden"><div></div></div>
+  <div id="catchcard"></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

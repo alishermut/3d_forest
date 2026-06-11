@@ -8,6 +8,7 @@ import {
   WORLD_RADIUS,
 } from './terrain.js';
 import { WATER_EXCLUDED_LAYER } from './water.js';
+import { getWheat } from './biomes.js';
 
 // Dense blade field like reference screenshot 1: thin tapered blades, dark
 // at the root and bright yellow-green at the tip, swaying in wind, patchy so
@@ -56,6 +57,9 @@ function pickSpot(cx, cz) {
     // (reeds-at-the-shore look), but not underwater, in the river, on
     // cliffs, or high on the mountains.
     if (getRiverDistance(x, z).d < 9) continue;
+    // Wheat field (Phase 18): forest blade grass stays out — the field gets
+    // its own wheat rendering in Phase 19.
+    if (rng() < getWheat(x, z) * 0.92) continue;
     const h = getHeight(x, z);
     if (h < -1.2 || h > 14 || getSlope(x, z) > 0.7) continue; // Phase 17 treeline
 
@@ -139,6 +143,10 @@ export function createGrass(scene, origin = { x: 0, z: 8 }) {
   return grassMesh;
 }
 
+// Hoisted scratch matrix — updateGrass runs every frame; allocating here
+// would feed the GC for no reason (perf batch 2026-06-11).
+const _scanM = new THREE.Matrix4();
+
 export function updateGrass(elapsedTime, playerPos) {
   const shader = grassMaterial?.userData.shader;
   if (shader) shader.uniforms.uTime.value = elapsedTime;
@@ -147,7 +155,7 @@ export function updateGrass(elapsedTime, playerPos) {
   // Scan one contiguous block per frame; relocate blades that fell behind.
   const start = scanCursor;
   const end = Math.min(start + BLADES_PER_FRAME, COUNT);
-  const m = new THREE.Matrix4();
+  const m = _scanM;
   let relocated = 0;
 
   for (let i = start; i < end; i++) {

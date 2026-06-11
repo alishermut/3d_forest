@@ -15,7 +15,17 @@ export class Hud {
       fog: false,
       fly: false,
       swim: false,
+      time: '08:24', // timeOfDay 0.35 default (Phase 28)
+      cycle: 'DAY',  // DAY / NIGHT / -> transitioning (Phase 30)
+      weapon: 'M16', // combat arc (Phase 40)
+      catches: 0,    // fishing arc (Phase 52)
     };
+    // Phase 30: the cycle row doubles as a BUTTON (usable outside pointer
+    // lock). Delegated — render() rebuilds innerHTML, killing listeners.
+    this.onCycle = null;
+    this.panel.addEventListener('click', (e) => {
+      if (e.target.closest('[data-act="cycle"]') && this.onCycle) this.onCycle();
+    });
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'F1') {
@@ -51,12 +61,18 @@ export class Hud {
       `<span class="dim">fly: Space/C up/down\n` +
       `water: Space/C surface/dive</span>\n` +
       `\n` +
+      `LMB fire · R reload\n` +
+      `1-4·wheel  <b class="on">${s.weapon}</b>\n` +
+      (s.catches > 0 ? `fish caught  <b class="on">${s.catches}</b>\n` : '') +
+      `\n` +
       `F1 this panel\n` +
       `F3 stats  ${onOff(s.stats)}\n` +
       `F4 AO     ${onOff(s.ao)}\n` +
       `F5 bloom  ${onOff(s.bloom)}\n` +
       `F6 rays   ${onOff(s.rays)}\n` +
       `F7 fog    ${onOff(s.fog)}\n` +
+      `[ ] time  <b class="on">${s.time}</b>\n` +
+      `<span data-act="cycle" style="cursor:pointer">N  cycle  <b class="on">${s.cycle}</b></span>\n` +
       `\n` +
       `mode <b class="on">${mode}</b>`;
   }

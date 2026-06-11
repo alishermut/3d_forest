@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
+import {
+  getWheat,
+  getDeepForest,
+  getWorldTreeClearing,
+  LAKE_CX,
+  LAKE_CZ,
+} from './biomes.js';
 
 // Terrain v2 (Phase 11): 800x800 m. Rolling forest in the west, a ridged
 // mountain range rising along the east side, a lake basin in the center,
@@ -7,17 +14,19 @@ import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 // Still ONE analytic getHeight(x, z) — the player, physics heightfield,
 // trees, grass and flowers all keep working because they all ask it.
 
-export const WORLD_SIZE = 1200;  // terrain extent in meters (Phase 16: was 800)
-export const WORLD_RADIUS = 560; // soft walkable boundary (circle)
-export const TERRAIN_SEGMENTS = 768; // grid subdivisions — same 1.56 m density as 512/800
+export const WORLD_SIZE = 900;   // terrain extent in meters (Phase 38 compaction: was 1200)
+export const WORLD_RADIUS = 420; // soft walkable boundary (circle)
+export const TERRAIN_SEGMENTS = 576; // grid subdivisions — same 1.56 m density (8x72 chunks)
 
-// Player spawn: west shore of the lake, looking east across the water
-// toward the sun and the mountains.
-export const SPAWN = { x: -120, z: 30 };
+// Player spawn (v7 map): the wheat field's lakeside edge, looking east
+// across the water toward the sun.
+export const SPAWN = { x: -45, z: 15 };
 
-// Lake (center of the map)
-const LAKE_X = 0;
-const LAKE_Z = 0;
+// Lake (Phase 38: moved east so the wheat plain owns the center-west).
+// The constants live in biomes.js (import root); re-exported here for
+// water/physics/scatter consumers.
+export const LAKE_X = LAKE_CX;
+export const LAKE_Z = LAKE_CZ;
 
 // Deterministic PRNG so the world is identical on every load.
 function mulberry32(seed) {
@@ -37,10 +46,10 @@ const tintNoise = new SimplexNoise({ random: mulberry32(9001) });
 // off the western range — inner spurs poking into the lowland and lone
 // hills near the tapered north/south ends. [x, z, height, radius]
 const FOOTHILLS = [
-  [-360, 140, 26, 58],
-  [-330, -190, 22, 52],
-  [-150, 420, 18, 48],
-  [-140, -430, 16, 44],
+  [-280, 120, 26, 58],
+  [-255, -160, 22, 52],
+  [-120, 330, 18, 48],
+  [-110, -340, 16, 44],
 ];
 
 function smoothstep(edge0, edge1, x) {
@@ -100,24 +109,47 @@ export function getRiverDistance(x, z) {
   return { d: Math.sqrt(best), t: bestT };
 }
 
+const lakeShapeNoise = new SimplexNoise({ random: mulberry32(7331) });
+
+// Natural lake (Phase 20): warped EFFECTIVE distance — an elongated ellipse
+// rotated ~27 deg with two noise octaves carving bays and headlands.
+// Returns circle-equivalent meters, so every consumer threshold (basin
+// carve, dry rim, beach profile, water level, scatter masks, wheat fade)
+// keeps its meaning unchanged.
 export function getLakeDistance(x, z) {
-  return Math.hypot(x - LAKE_X, z - LAKE_Z);
+  const dx = x - LAKE_X;
+  const dz = z - LAKE_Z;
+  const rx = (dx * 0.891 + dz * 0.454) / 1.27; // elongated along NE-SW
+  const rz = (-dx * 0.454 + dz * 0.891) / 0.82;
+  let d = Math.hypot(rx, rz);
+  d += lakeShapeNoise.noise(x / 110, z / 110) * 13;
+  d += lakeShapeNoise.noise(x / 37 + 7.3, z / 37 - 2.1) * 5;
+  return Math.max(d, 0);
 }
 
 // Single source of truth for ground height.
 export function getHeight(x, z) {
   // Rolling forest hills
   let h = 0;
-  h += heightNoise.noise(x / 150, z / 150) * 6.0;
+  const lowFreq = heightNoise.noise(x / 150, z / 150) * 6.0;
+  h += lowFreq;
   h += heightNoise.noise(x / 45, z / 45) * 1.5;
   h += heightNoise.noise(x / 12, z / 12) * 0.3;
+
+  // Wheat plain (Phase 18): the field flattens toward a gently rolling
+  // version of the low-frequency term — farmland, not a snooker table.
+  const wheat = getWheat(x, z);
+  if (wheat > 0) {
+    h = lerp(h, lowFreq * 0.3 + 1.4, wheat * 0.9);
+  }
+
 
   // Western mountain range (Phase 17, replaces the old east range): a polar
   // ridge band hugging the west rim. Amplitude keeps rising past the world
   // boundary to the mesh edge, so from inside the massif never visibly ends.
   // Ridged noise (1 - |n|) for sharp crests, like the old range.
   const dist = Math.hypot(x, z);
-  if (dist > 290) {
+  if (dist > 210) {
     // Angle from due west (0 = straight west, grows toward N/S).
     const theta = Math.atan2(z, -x);
     // Ragged angular taper: full massif within ~±50 deg, noise-warped fade
@@ -126,9 +158,10 @@ export function getHeight(x, z) {
     const aMask = 1 - smoothstep(0.85, 1.4, Math.abs(theta) + edgeWarp);
     if (aMask > 0) {
       // Inner edge warped per angle -> rocky spurs and valleys cut into the
-      // lowland instead of a clean circular wall.
-      const rIn = 395 + heightNoise.noise(theta * 3.1 + 3.3, 0.5) * 55;
-      const radial = smoothstep(rIn, rIn + 110, dist);
+      // lowland instead of a clean circular wall. (Phase 38: rescaled to
+      // the 420 m rim — still rising past it, the off-map illusion holds.)
+      const rIn = 300 + heightNoise.noise(theta * 3.1 + 3.3, 0.5) * 45;
+      const radial = smoothstep(rIn, rIn + 95, dist);
       const ridge1 = 1 - Math.abs(heightNoise.noise(x / 170, z / 170));
       const ridge2 = 1 - Math.abs(heightNoise.noise(x / 68 + 9.7, z / 68 - 3.1));
       const a = aMask * radial;
@@ -162,6 +195,17 @@ export function getHeight(x, z) {
     // full takeover, so the waterline stays irregular like a real bank.
     const beach = lerp(2.2, -10.5, smoothstep(108, 30, dl));
     h = lerp(h, Math.min(h, beach), smoothstep(118, 88, dl));
+  }
+
+  // Island (Phase 20): a flat-topped bump in the basin toward the northeast
+  // shore, ~22 m across, crest ~2-3 m above the waterline. Edge radius is
+  // noise-wobbled so the outline is ragged, not a perfect circle. Placed
+  // AFTER the basin block (the beach min() would flatten it otherwise);
+  // vegetation, physics, and the analytic-depth foam ring pick it up free.
+  const islandR = Math.hypot(x - (LAKE_X + 38), z - (LAKE_Z + 32));
+  if (islandR < 45) {
+    const wob = 1 + 0.25 * heightNoise.noise(x / 8, z / 8);
+    h += 11 * (1 - smoothstep(6, 22, islandR * wob));
   }
 
   // River channel (Phase 15 rewrite): FORCE the terrain to the bed profile
@@ -383,9 +427,43 @@ export function createTerrain({ map, normalMap, armMap, rockMap }) {
           // Macro tint: darker earthy patches vs lighter mossy ones.
           const t = getTint(x, z);
           const shade = 0.72 + t * 0.42;
-          colors[v * 3 + 0] = shade * 0.98;
-          colors[v * 3 + 1] = shade;
-          colors[v * 3 + 2] = shade * 0.92;
+          let cr = shade * 0.98;
+          let cg = shade;
+          let cb = shade * 0.92;
+          // Biome tints (Phase 18): dry gold in the wheat field, darker
+          // floor under the deep forest east. Height backstop (2026-06-11):
+          // gold fades out above ~4 m so rises inside the mask's fade band
+          // (foothill skirts) keep forest-floor ground — the field interior
+          // (flattened to <= ~3.7 m) keeps full gold.
+          const wheat = getWheat(x, z) * (1 - smoothstep(4.0, 7.0, h));
+          if (wheat > 0) {
+            const g = 1.0 + t * 0.3; // golden, still tint-varied
+            cr = lerp(cr, g * 1.32, wheat * 0.95);
+            cg = lerp(cg, g * 1.06, wheat * 0.95);
+            cb = lerp(cb, g * 0.52, wheat * 0.95);
+          }
+          const deep = getDeepForest(x, z);
+          if (deep > 0) {
+            const dk = 1 - 0.22 * deep;
+            cr *= dk;
+            cg *= dk;
+            cb *= dk;
+          }
+          // World-tree clearing (Phase 39): bare packed earth at the trunk,
+          // blending back to field gold past the dripline. AFTER the wheat
+          // tint so it overrides the gold.
+          const clearing = getWorldTreeClearing(x, z);
+          if (clearing > 0) {
+            // v8 giant mask reaches ~52 m — keep bare earth to the root
+            // zone (~25 m) and let wheat thin across the outer dripline.
+            const earth = smoothstep(0.6, 0.92, clearing);
+            cr = lerp(cr, 0.6 + t * 0.12, earth);
+            cg = lerp(cg, 0.47 + t * 0.1, earth);
+            cb = lerp(cb, 0.34 + t * 0.08, earth);
+          }
+          colors[v * 3 + 0] = cr;
+          colors[v * 3 + 1] = cg;
+          colors[v * 3 + 2] = cb;
 
           // Rock shows where it's steep or high (cliffs, upper mountains).
           const slope = Math.hypot(dhdx, dhdz);

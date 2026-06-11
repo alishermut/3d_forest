@@ -1,5 +1,11 @@
 import * as THREE from 'three';
-import { getHeight, LAKE_WATER_Y } from './terrain.js';
+import {
+  getHeight,
+  getLakeDistance,
+  LAKE_WATER_Y,
+  LAKE_X,
+  LAKE_Z,
+} from './terrain.js';
 import { beginWaterPrePass, endWaterPrePass } from './trees.js';
 import {
   sunDirection,
@@ -120,6 +126,30 @@ function makeWaterNormalTexture(size = 256) {
 
 let normalTex = null;
 
+// Phase 20: per-pixel lake mask — the warped getLakeDistance baked once into
+// a small texture (a circular uClipRadius can't follow bays/headlands). The
+// shader discards fragments whose baked distance exceeds the threshold.
+const LAKE_MASK_RANGE = 150; // texture covers ±range meters around the lake CENTER
+function bakeLakeMask() {
+  const N = 256;
+  const data = new Uint8Array(N * N * 4);
+  for (let j = 0; j < N; j++) {
+    const z = LAKE_Z + (j / (N - 1) - 0.5) * 2 * LAKE_MASK_RANGE;
+    for (let i = 0; i < N; i++) {
+      const x = LAKE_X + (i / (N - 1) - 0.5) * 2 * LAKE_MASK_RANGE;
+      const d = Math.min(getLakeDistance(x, z), 300);
+      const o = (j * N + i) * 4;
+      data[o] = Math.round((d / 300) * 255);
+      data[o + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 // =============================================================================
 // Gerstner waves. THE SAME three waves are evaluated in the vertex shader (for
 // the surface) and here in JS (for buoyancy/swim physics) — keep them in sync.
@@ -187,10 +217,14 @@ function makeWaterMaterial(opts) {
         uRippleScale: { value: rippleScale },
         uBump: { value: bump },
         uClipRadius: { value: clipRadius },
+        uLakeMask: { value: null },
+        uLakeCenter: { value: new THREE.Vector2(LAKE_X, LAKE_Z) },
+        // SHARED live references (Phase 28): the water's analytic sky
+        // gradient follows the dynamic sun/dusk/night for free.
         uSunDir: { value: sunDirection },
-        uSunColor: { value: new THREE.Color().copy(SUN_COLOR) },
-        uHorizon: { value: new THREE.Color().copy(FOG_COLOR) },
-        uZenith: { value: new THREE.Color().copy(ZENITH_COLOR) },
+        uSunColor: { value: SUN_COLOR },
+        uHorizon: { value: FOG_COLOR },
+        uZenith: { value: ZENITH_COLOR },
         uNormalMap: { value: null },
         // Reflection (planar, lake only)
         uReflection: { value: null },
@@ -282,6 +316,8 @@ function makeWaterMaterial(opts) {
       uniform float uRippleScale;
       uniform float uBump;
       uniform float uClipRadius;
+      uniform sampler2D uLakeMask;
+      uniform vec2 uLakeCenter;
       uniform vec3 uSunDir;
       uniform vec3 uSunColor;
       uniform vec3 uHorizon;
@@ -361,7 +397,13 @@ function makeWaterMaterial(opts) {
       }
 
       void main() {
-        if (uClipRadius > 0.0 && length(vWorldPos.xz) > uClipRadius) discard;
+        // Phase 20: per-pixel warped lake distance (baked) replaces the old
+        // circular clip — the sheet follows the bays/headlands exactly.
+        if (uClipRadius > 0.0) {
+          vec2 lakeUV = (vWorldPos.xz - uLakeCenter + 150.0) / 300.0;
+          float lakeD = texture2D(uLakeMask, lakeUV).r * 300.0;
+          if (lakeD > uClipRadius) discard;
+        }
 
         // ---- Surface normal: low-freq swell + 4 octaves of the ripple map.
         vec2 buv = vWorldPos.xz / uRippleScale;
@@ -476,14 +518,17 @@ export function createWater(scene, renderer, camera) {
   reflectionRT.texture.minFilter = THREE.LinearFilter;
   reflectionRT.texture.magFilter = THREE.LinearFilter;
 
-  // --- Lake: a flat sheet over the basin.
-  const lakeGeo = new THREE.PlaneGeometry(240, 240, 96, 96);
+  // --- Lake: a flat sheet over the basin (280 m covers the Phase 20
+  // elongated shape + bays; the baked mask clips it to the waterline).
+  const lakeGeo = new THREE.PlaneGeometry(280, 280, 112, 112);
   lakeGeo.rotateX(-Math.PI / 2);
   {
     const pos = lakeGeo.attributes.position;
     const depths = new Float32Array(pos.count);
     for (let i = 0; i < pos.count; i++) {
-      depths[i] = LAKE_WATER_Y - getHeight(pos.getX(i), pos.getZ(i));
+      // Geometry is local — the mesh sits at the lake center (Phase 38).
+      depths[i] =
+        LAKE_WATER_Y - getHeight(pos.getX(i) + LAKE_X, pos.getZ(i) + LAKE_Z);
     }
     lakeGeo.setAttribute('aDepth', new THREE.BufferAttribute(depths, 1));
   }
@@ -501,6 +546,7 @@ export function createWater(scene, renderer, camera) {
     edge: 0.5,
     foamStrength: 0.6,
   });
+  lakeMaterial.uniforms.uLakeMask.value = bakeLakeMask();
   lakeMaterial.uniforms.uReflection.value = reflectionRT.texture;
   lakeMaterial.uniforms.uRefraction.value = refractionRT.texture;
   lakeMaterial.uniforms.uDepthTex.value = refractionRT.depthTexture;
@@ -512,7 +558,7 @@ export function createWater(scene, renderer, camera) {
   lakeMaterial.uniforms.uReflectivity.value = 0.85;
 
   lakeMesh = new THREE.Mesh(lakeGeo, lakeMaterial);
-  lakeMesh.position.y = LAKE_WATER_Y;
+  lakeMesh.position.set(LAKE_X, LAKE_WATER_Y, LAKE_Z);
   lakeMesh.renderOrder = 2;
   lakeMesh.matrixAutoUpdate = true;
   lakeMesh.updateMatrixWorld(true);
@@ -600,11 +646,24 @@ function renderReflection(renderer, scene, camera) {
 const _frustum = new THREE.Frustum();
 const _projScreen = new THREE.Matrix4();
 const _camInverse = new THREE.Matrix4();
-// Generous lake bound: clip radius 106 + margin for waves/one-frame lag.
-const _lakeSphere = new THREE.Sphere(new THREE.Vector3(0, LAKE_WATER_Y, 0), 112);
+// Generous lake bound: Phase 20 elongated waterline reaches ~116 m
+// geometric + margin for waves/one-frame lag (centered on the moved lake).
+const _lakeSphere = new THREE.Sphere(
+  new THREE.Vector3(LAKE_X, LAKE_WATER_Y, LAKE_Z),
+  130
+);
+
+// Alternating pre-passes (perf batch 2026-06-11): refraction renders on
+// even frames, reflection on odd — each half-res target updates at ~30 Hz,
+// invisible on a rippling, fresnel-blended surface, and it halves the
+// frame-cost cliff of the lake entering the frustum. The frame the lake
+// REAPPEARS renders both (otherwise one target would be seconds stale).
+let _prepFrame = 0;
+let _lastLakeFrame = -10;
 
 export function prepareWater(renderer, scene, camera) {
   if (!refractionRT) return;
+  _prepFrame++;
 
   // Both pre-passes exist only to feed the water shaders — when neither
   // water body can be on screen, skip the two extra scene renders entirely.
@@ -613,6 +672,11 @@ export function prepareWater(renderer, scene, camera) {
   _projScreen.multiplyMatrices(camera.projectionMatrix, _camInverse);
   _frustum.setFromProjectionMatrix(_projScreen);
   if (!_frustum.intersectsSphere(_lakeSphere)) return;
+
+  const lakeReappeared = _prepFrame - _lastLakeFrame > 1;
+  _lastLakeFrame = _prepFrame;
+  const doRefraction = lakeReappeared || _prepFrame % 2 === 0;
+  const doReflection = lakeReappeared || _prepFrame % 2 === 1;
 
   const prevTarget = renderer.getRenderTarget();
   const prevShadowAuto = renderer.shadowMap.autoUpdate;
@@ -630,12 +694,14 @@ export function prepareWater(renderer, scene, camera) {
   beginWaterPrePass(camera.position);
 
   // 1) Refraction + depth: the scene with no water, from the main camera.
-  renderer.setRenderTarget(refractionRT);
-  renderer.clear();
-  renderer.render(scene, camera);
+  if (doRefraction) {
+    renderer.setRenderTarget(refractionRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+  }
 
   // 2) Planar reflection for the lake.
-  renderReflection(renderer, scene, camera);
+  if (doReflection) renderReflection(renderer, scene, camera);
 
   endWaterPrePass();
   lakeMesh.visible = lakeVisible;

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Old Oak Tree
+* source:	https://sketchfab.com/3d-models/old-oak-tree-810208743d0e4cffadb15e77211b3a60
+* author:	BazukaliKartal (https://sketchfab.com/BazukaliKartal)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Old Oak Tree" (https://sketchfab.com/3d-models/old-oak-tree-810208743d0e4cffadb15e77211b3a60) by BazukaliKartal (https://sketchfab.com/BazukaliKartal) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

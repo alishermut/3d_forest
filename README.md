@@ -27,6 +27,19 @@ npm run build    # static production build in dist/
 | `Esc` | Release the mouse |
 | `F3` | Stats HUD (fps / draw calls / triangles) |
 | `F4` / `F5` / `F6` / `F7` | Toggle AO / bloom / god rays / fog |
+| `1` / `2` / `3` / `4` (or wheel) | Knife / pistol / rifle / fishing rod |
+| `LMB` | Fire — or with the rod: hold to charge a cast, release to throw |
+| `R` | Reload |
+| `N` / `[` `]` | Day-night cycle / scrub time |
+
+## Fishing
+
+Equip the rod (`4`), hold LMB to charge and release to cast toward the lake.
+Watch the bobber: small dips are nibbles — wait for the deep plunge, then
+click within the bite window to hook. Fight the fish with the tension bar:
+hold LMB to reel (tension climbs), release to let it run (tension falls).
+Max tension snaps the line; too much slack and it slips the hook. Land it
+to add to your tally.
 
 ## What's inside
 
@@ -52,6 +65,27 @@ npm run build    # static production build in dist/
 - **Details** — white/yellow flower clumps and rocks (models from the
   ez-tree demo), reed bands at the lake shore, drifting dust motes, subtle
   head-bob, looping forest ambience.
+- **Wildlife** — deer and a stag (animated GLB clips: graze, walk, gallop
+  flee), hopping rabbits, hedgehogs, ~10 fish swimming in the lake, plus
+  birds, butterflies, flies, and fireflies after dusk. Animals wander a
+  biome-aware state machine and freeze beyond the fog for free.
+- **Weapons & fishing** — knife, pistol, M16 (GLB viewmodels with
+  procedural arms, swept-raycast ballistics, surface-aware impacts) and a
+  full fishing loop: charged cast, wave-riding bobber, nibble fakeouts,
+  bite window, tension tug-of-war, catch presentation with species/size
+  rolls.
+
+## Asset credits
+
+- Animal, fish, weapon, and fishing-rod models by
+  [Quaternius](https://quaternius.com) — CC0.
+- *Cottontail rabbit* and *Jackrabbit* models by **Poly by Google** —
+  [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- Gunshot samples from michorvath's CC0 pack on freesound.org.
+- Trees/flowers/ambience from [ez-tree](https://github.com/dgreenheck/ez-tree)
+  (MIT); ground/rock textures from Poly Haven (CC0).
+
+Full per-file list in `public/models/LICENSES.md`.
 
 ## Performance notes
 

@@ -49,6 +49,9 @@ export const PLAYER = {
 let world = null;
 let playerBody = null;
 let playerCollider = null;
+// Surface kind per collider handle (combat arc): 'dirt' | 'wood' | 'rock'.
+// Impact FX pick decal/particle/sound flavor from this.
+const colliderKinds = new Map();
 let characterController = null;
 let verticalVelocity = 0;
 let accumulator = 0;
@@ -67,9 +70,10 @@ export async function initPhysics(
   createTrunkColliders(trunks);
   createLogColliders(logs);
   for (const r of rocks) {
-    world.createCollider(
+    const c = world.createCollider(
       RAPIER.ColliderDesc.ball(r.r).setTranslation(r.x, r.y, r.z)
     );
+    colliderKinds.set(c.handle, 'rock');
   }
   createPlayer(spawn);
   createTestCrate(scene, spawn);
@@ -97,13 +101,14 @@ function createTerrainCollider() {
     }
   }
 
-  world.createCollider(
+  const c = world.createCollider(
     RAPIER.ColliderDesc.heightfield(n, n, heights, {
       x: WORLD_SIZE,
       y: 1,
       z: WORLD_SIZE,
     })
   );
+  colliderKinds.set(c.handle, 'dirt');
 }
 
 // Truth test: raycast the collider at sample points and compare against
@@ -111,8 +116,12 @@ function createTerrainCollider() {
 function verifyHeightfield() {
   // Rapier's query pipeline (BVH) only exists after a step.
   world.step();
+  // Sample points deliberately OFF the heightfield lattice (multiples of
+  // the 1.5625 m grid pitch): a ray passing exactly through a triangle
+  // edge/vertex can miss degenerately in Rapier (hit (150, 9) on the 576
+  // grid — x/pitch = 96.0 exactly).
   const samples = [
-    [37, -81], [-122, 54], [88, 133], [-15, -40], [150, 9], [-90, -150],
+    [37, -81], [-122, 54], [88, 133], [-15, -40], [150.7, 9.3], [-90.4, -149.3],
   ];
   const results = [];
   for (const [x, z] of samples) {
@@ -141,9 +150,17 @@ function verifyHeightfield() {
 function createTrunkColliders(trunks) {
   for (const t of trunks) {
     const baseY = getHeight(t.x, t.z);
-    world.createCollider(
-      RAPIER.ColliderDesc.cylinder(4, t.r).setTranslation(t.x, baseY + 3.6, t.z)
+    // halfH: forest trunks are 8 m tall; the world tree (Phase 39) passes a
+    // taller cylinder so its thick trunk can't be jumped "into".
+    const halfH = t.halfH ?? 4;
+    const c = world.createCollider(
+      RAPIER.ColliderDesc.cylinder(halfH, t.r).setTranslation(
+        t.x,
+        baseY + halfH - 0.4,
+        t.z
+      )
     );
+    colliderKinds.set(c.handle, 'wood');
   }
 }
 
@@ -155,11 +172,12 @@ function createLogColliders(logs) {
     const q = new THREE.Quaternion()
       .setFromEuler(new THREE.Euler(l.tilt, l.yaw, 0))
       .multiply(qLie);
-    world.createCollider(
+    const c = world.createCollider(
       RAPIER.ColliderDesc.cylinder(l.halfLen, l.r)
         .setTranslation(l.x, l.y, l.z)
         .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
     );
+    colliderKinds.set(c.handle, 'wood');
   }
 }
 
@@ -272,10 +290,11 @@ function createTestCrate(scene, spawn) {
       .setTranslation(x, y, z)
       .setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0.6, 0)))
   );
-  world.createCollider(
+  const crateCol = world.createCollider(
     RAPIER.ColliderDesc.cuboid(0.35, 0.35, 0.35).setDensity(150).setFriction(0.8),
     body
   );
+  colliderKinds.set(crateCol.handle, 'wood');
 
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.7, 0.7, 0.7),
@@ -343,4 +362,42 @@ export function getWaterLevel(x, z) {
 export function isSubmerged(position) {
   const level = waterLevelAt(position.x, position.z);
   return level !== null && position.y < level;
+}
+
+// ---------------------------------------------------------------------------
+// Combat queries (v4): bullets sweep the SAME colliders the player walks on.
+// ---------------------------------------------------------------------------
+// dir must be normalized. Returns null or
+// { point, normal, dist, kind, body } — body only for dynamic hits.
+export function raycastBullet(origin, dir, maxDist) {
+  if (!world) return null;
+  const ray = new RAPIER.Ray(origin, dir);
+  const hit = world.castRayAndGetNormal(
+    ray,
+    maxDist,
+    true,
+    undefined,
+    undefined,
+    playerCollider,
+    playerBody
+  );
+  if (!hit) return null;
+  const body = hit.collider.parent();
+  const dynamic = !!body && body.isDynamic();
+  return {
+    point: ray.pointAt(hit.timeOfImpact),
+    normal: hit.normal,
+    dist: hit.timeOfImpact,
+    kind: colliderKinds.get(hit.collider.handle) ?? 'dirt',
+    body: dynamic ? body : null,
+  };
+}
+
+// Kick a dynamic body at the hit point (crate today, debris tomorrow).
+export function applyHitImpulse(body, dir, point, magnitude) {
+  body.applyImpulseAtPoint(
+    { x: dir.x * magnitude, y: dir.y * magnitude, z: dir.z * magnitude },
+    point,
+    true
+  );
 }
