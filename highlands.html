@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Highlands — stylized streamed world</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #aacbe6; }
+    canvas { display: block; }
+
+    #hud {
+      position: fixed; top: 10px; left: 10px; z-index: 10;
+      color: #11324a; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+      background: rgba(255, 255, 255, 0.45);
+      border: 1px solid rgba(40, 90, 130, 0.25);
+      border-radius: 8px; padding: 8px 11px;
+      backdrop-filter: blur(6px); user-select: none; pointer-events: none;
+      white-space: pre;
+    }
+    #hud .title { font-weight: 700; letter-spacing: 0.14em; }
+    #hud .dim { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hud"><span class="title">HIGHLANDS</span>
+<span class="dim">phase 0 · scaffold</span>
+drag: orbit · scroll: zoom</div>
+  <script type="module" src="/src/highlands/main.js"></script>
+</body>
+</html>

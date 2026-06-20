@@ -82,6 +82,16 @@ export const logColliders = [];  // fallen logs: {x, y, z, yaw, tilt, halfLen, r
 // needs no root colliders) but the export stays for main.js's concat.
 export const worldTreeFlares = []; // {x, y, z, r}
 
+// Canopy glow rig (v9 trick, back for the v14 photolike crown): the model's
+// leaf texture is dark and its card normals scatter, so the crown measures
+// darker than every forest tree even sun-on. Emissive-through-leaf-map
+// fakes bounce light; main.js scales it with the live sun so it dies at
+// night instead of glowing.
+let worldTreeCanopyMat = null;
+export function setWorldTreeCanopyGlow(f) {
+  if (worldTreeCanopyMat) worldTreeCanopyMat.emissiveIntensity = f;
+}
+
 const leafMaterials = [];
 
 // ez-tree's built-in leaf wind shader replaces three's project_vertex chunk
@@ -427,34 +437,53 @@ function createWorldTree(scene) {
   new GLTFLoader().load('/models/old_oak_tree/scene.gltf', (gltf) => {
     const root = gltf.scene;
 
-    // Scale by the MEASURED bbox (Sketchfab exports carry arbitrary node
-    // scales); seat the bbox bottom slightly below the terrain.
-    const bb = new THREE.Box3().setFromObject(root);
-    const scale = WORLD_TREE_TARGET_H / (bb.max.y - bb.min.y);
-    root.scale.multiplyScalar(scale);
-    root.position.set(
-      WORLD_TREE_X,
-      baseY - bb.min.y * scale - 0.2,
-      WORLD_TREE_Z
-    );
-
+    // Material fixes first — the pass below also classifies meshes so the
+    // GROUNDING uses only the solid bark/trunk geometry. The model's leaf
+    // cards droop ~25% below the trunk base; seating by the union bbox
+    // floated the trunk ~3.4 m in the air (user-reported, then measured).
+    const solid = [];
     root.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
       o.receiveShadow = true;
       const m = o.material;
       if (!m) return;
-      // Leaves ship as alphaMode BLEND — transparent sorting falls apart
-      // inside a dense canopy and BLEND skips the depth the AO / godrays /
-      // water passes read. Alpha-tested cutout is the correct foliage mode
-      // and makes the leaf shadows work for free.
+      // Leaves ship as alphaMode BLEND with SOFT-GRADIENT alpha (painterly
+      // cluster photos). Alpha-test culled everything but the opaque core —
+      // the crown shriveled to tufts (verified by screenshot). alphaHash is
+      // the right mode: dithered transparency keeps the soft look, writes
+      // depth (AO / godrays / water passes work), needs no sorting, and
+      // SMAA smooths the dither.
       if (m.transparent) {
         m.transparent = false;
         m.depthWrite = true;
-        m.alphaTest = Math.max(m.alphaTest || 0, 0.45);
+        m.alphaHash = true;
+        // Dense canopy receiving its own shadow map reads near-black (the
+        // recurring hero-tree gotcha — same fix as v8/v11): cast only.
+        o.receiveShadow = false;
+        // Bounce-light fake (see setWorldTreeCanopyGlow above).
+        m.emissive.setRGB(0.5, 0.56, 0.4);
+        m.emissiveMap = m.map;
+        m.emissiveIntensity = 1;
+        worldTreeCanopyMat = m;
         m.needsUpdate = true;
+      } else {
+        solid.push(o);
       }
     });
+
+    // Scale by the MEASURED full bbox (Sketchfab exports carry arbitrary
+    // node scales); seat the SOLID-GEOMETRY bottom into the terrain.
+    const bb = new THREE.Box3().setFromObject(root);
+    const scale = WORLD_TREE_TARGET_H / (bb.max.y - bb.min.y);
+    const bbSolid = new THREE.Box3();
+    for (const o of solid) bbSolid.expandByObject(o);
+    root.scale.multiplyScalar(scale);
+    root.position.set(
+      WORLD_TREE_X,
+      baseY - bbSolid.min.y * scale - 0.45,
+      WORLD_TREE_Z
+    );
 
     scene.add(root);
   });

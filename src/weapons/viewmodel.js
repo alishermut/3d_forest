@@ -22,14 +22,15 @@ function smooth(t) {
 export class Viewmodel {
   constructor() {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(
-      55,
-      window.innerWidth / window.innerHeight,
-      0.01,
-      8
-    );
+    // Guard against a 0-size window (aspect NaN -> degenerate projection ->
+    // nothing rasterizes). Fall back to 16:9 until a real size is known.
+    const aspectOf = () =>
+      window.innerWidth && window.innerHeight
+        ? window.innerWidth / window.innerHeight
+        : 16 / 9;
+    this.camera = new THREE.PerspectiveCamera(55, aspectOf(), 0.01, 8);
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.aspect = aspectOf();
       this.camera.updateProjectionMatrix();
     });
 

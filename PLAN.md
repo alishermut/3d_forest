@@ -1009,6 +1009,37 @@ from the 2 water pre-passes (needs shadow-camera layers tweak — the
 WATER_EXCLUDED_LAYER trick alone would kill its shadow). Weeds unchanged.
 Forest stays ez-tree (instancing/impostor pipeline depends on it).
 
+**v13 (same day, brief):** user rejected the island tree ("doesn't look like
+oak") and wanted the Sketchfab BBARTS oak — account-walled (Sketchfab is
+sunsetting into Fab; signup closed for the user). Interim ez-tree recreation
+(aspen bark + green oak leaves) shipped, learning two API gotchas: leaf
+`type` strings are LOWERCASE ('Oak' silently loads no texture = white
+crown), and leaf green comes from the TEXTURE (tint d5d5cd is near-neutral).
+Superseded within the hour by v14.
+
+**v14 (2026-06-11, user-downloaded model):** the lone oak is now Sketchfab
+"Old Oak Tree" by BazukaliKartal, CC-BY-4.0 — CREDIT REQUIRED, license.txt
+ships in public/models/old_oak_tree/ (~45 MB; 315k tris — 5x lighter than
+the island tree; the unused island_tree_01 assets were deleted). Verified
+render: 4.49 ms facing it (best of any hero so far). Three integration
+fixes, each verified by staged screenshot + readback:
+(1) the export REQUIRES KHR_materials_pbrSpecularGlossiness, which
+three.js GLTFLoader dropped — scene.gltf converted offline to metallic-
+roughness (node script; diffuse→baseColor, metal 0 / rough 0.9);
+(2) leaves are BLEND with SOFT-GRADIENT alpha — alpha-test culled all but
+the opaque core (crown shriveled to tufts); fix = material.alphaHash
+(dithered transparency: soft look, writes depth, no sorting, SMAA smooths);
+(3) GROUNDING: the union bbox bottom is drooping LEAF cards (-25% below
+the trunk base) — seating by it floated the trunk 3.4 m up (user-reported
+"lower trunk not visible"); fix = seat by the SOLID-mesh-only bbox, sunk
+0.45 m. Plus the two recurring hero-canopy lessons re-applied: leaves cast-
+no-receive, and the v9 sun-scaled emissive glow rig restored (the scan's
+leaf texture is dark; emissive (0.5,0.56,0.4) through the leaf map,
+intensity = clamp(sun.intensity/5.5, 0.04, 1) per frame from main.js).
+GOTCHA (verification): a paused hidden tab never composes matrixWorld for
+freshly-loaded async models — per-mesh world-bbox probes read garbage
+unless scene.updateMatrixWorld(true) runs first.
+
 ---
 
 ## Part C — Nature detail pass
@@ -1677,6 +1708,41 @@ blocked at a habitat edge, and the arrival check right after read
 tryMove. Verified: 10 simulated minutes / 36k frames cycling watchers
 across all 54 animals (everyone wanders into edges) — zero exceptions,
 healthy state mix, no walk-state animal left with a null target.
+
+**PERF FIX (2026-06-11, user report after the 5x pass):** profiled the
+live frame (prepareWater + composer, renderer.info A/B). Verdict: animals
++ fish = ZERO measurable tris (already distance-frozen); the cost was
+FLOWERS — ~2,400 × 788-tri plants in 4 world-spanning InstancedMeshes
+whose bounding spheres the frustum could never reject, drawn in BOTH
+scene passes (RenderPass + N8AO's depth/normal pre-pass) = 3.7M
+tris/frame, 34% of the spawn view, in EVERY view. Fix: per-80 m-cell
+InstancedMeshes (tight spheres → frustum culling finally works; the
+trees/wheat pattern) + `updateFlowers()` distance cutoff at 165 m in the
+loop. Measured after: ~0.3M tris of flowers in view, spawn frame ~5.1M
+total. Call count rose (~116 cell meshes × material groups) — acceptable,
+the frame is vertex-bound (Phase 35 finding); collapse the 6 material
+groups to 2 if calls ever matter. MEASUREMENT GOTCHA: a freshly reloaded
+hidden tab has VIRGIN tree-LOD state (the loop never ran, no impostor
+swaps applied) — call updateTrees + updateFlowers manually before
+measuring or the frame reads 4x heavier than live.
+
+**REAL FPS ARMS (2026-06-11, user request + user-downloaded asset):**
+DJMaesen's "First Person arms" (Sketchfab, CC-BY 4.0 — attribution added
+to LICENSES.md + README) replaces the procedural mitten arms on all four
+rigs via `attachArms` in models.js (same placeholder pattern: mittens
+render until the GLB lands; load failure keeps them). Fitting is a
+deterministic two-point WRIST-BONE fit: pin the right wrist exactly on
+the weapon's grip coordinate (the same targets the mittens used), then
+YAW the wrap so the left wrist aims at the support grip; re-pin after.
+Findings that cost iterations: (1) bbox-anchoring floats the hands —
+the box top is the SHOULDERS; (2) full 3D wrist-axis alignment
+(setFromUnitVectors) pitches the chest mass into the near plane and
+floods the view — yaw-only, the leftover drop reads as cradling the
+handguard from below; (3) the bind pose holds wrists ~22 cm apart, so
+the pistol went ONE-HANDED (collapseLeft scales L_arm_02 to zero) — two
+hands can't meet on one grip without bone surgery. Verified per-weapon
+via wrist-coordinate readback (right wrist lands to the mm) + viewmodel
+ASCII renders. In-hand look in motion is the user's checkpoint.
 
 ## v5 Status
 

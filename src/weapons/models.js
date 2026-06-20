@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { loadGLB, measureRestBox } from '../core/assets.js';
 
 // Viewmodels — procedural arms + weapons. Convention: weapon forward is -Z
@@ -49,6 +50,11 @@ const MATS = {
     metalness: 0,
     roughness: 0.95,
   }),
+  glove: new THREE.MeshStandardMaterial({
+    color: 0x26282d,
+    metalness: 0.05,
+    roughness: 0.9,
+  }),
 };
 
 function box(w, h, d, mat, x = 0, y = 0, z = 0) {
@@ -97,6 +103,74 @@ function arm(elbow, grip) {
   return g;
 }
 
+// ---------------------------------------------------------------------------
+// Procedural GLOVED gripping hand (replaces the GLB FPS arms — see PLAN v6).
+// Built deterministically around a handle so it can be placed exactly on each
+// weapon's grips. Local frame: handle runs along +Z, palm sits at -Y, fingers
+// wrap up the front (+X) and over the top.
+// ---------------------------------------------------------------------------
+
+// A curled finger: a short chain of glove segments hugging the handle circle
+// (radius R) in the local XY plane, at distance `z` along the handle.
+function curledFinger(z, R, fr, totalWrap, startAngle, segs = 4) {
+  const g = new THREE.Group();
+  g.position.z = z;
+  const ringR = R + fr * 0.8;
+  const segLen = (totalWrap * ringR) / segs;
+  for (let i = 0; i < segs; i++) {
+    const a = startAngle + ((i + 0.5) / segs) * totalWrap;
+    const seg = new THREE.Mesh(
+      new THREE.BoxGeometry(fr * 1.7, fr * 1.7, segLen * 0.92),
+      MATS.glove
+    );
+    seg.position.set(Math.cos(a) * ringR, Math.sin(a) * ringR, 0);
+    // box length (local Z) points along the circle tangent
+    const t = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0);
+    seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), t);
+    g.add(seg);
+  }
+  return g;
+}
+
+// Palm + 4 fingers + thumb wrapping a handle of radius R (local frame above).
+function buildGripHand(parent, { R = 0.018, fr = 0.0078, side = 'R' } = {}) {
+  // palm under the handle + back-of-hand block over it
+  parent.add(box(0.05, 0.024, 0.072, MATS.glove, 0, -(R + 0.012), 0.004));
+  parent.add(box(0.044, 0.018, 0.058, MATS.glove, 0, -(R - 0.004), 0.004));
+  // four fingers across the handle, wrapping front -> over the top -> back
+  const zPos = [-0.027, -0.009, 0.009, 0.027];
+  zPos.forEach((z, i) => {
+    parent.add(curledFinger(z, R, fr, Math.PI * (0.92 + 0.04 * i), -0.35));
+  });
+  // thumb: opposite side, shorter wrap, near the rear of the palm
+  const tz = side === 'R' ? 0.034 : -0.034;
+  parent.add(curledFinger(tz, R, fr * 1.15, Math.PI * 0.62, Math.PI * 0.9));
+}
+
+// Gloved forearm + a gripping hand placed at `grip`, oriented so the handle
+// axis is `handleDir` and the forearm runs back toward `elbow`.
+function glovedArm(elbowArr, gripArr, handleDirArr, opts = {}) {
+  const g = new THREE.Group();
+  const elbow = new THREE.Vector3(...elbowArr);
+  const grip = new THREE.Vector3(...gripArr);
+  const fwd = new THREE.Vector3().subVectors(grip, elbow).normalize();
+  const wristPt = grip.clone().addScaledVector(fwd, -0.05);
+  g.add(limb(elbow, wristPt, 0.056, 0.032, MATS.glove)); // sleeve forearm
+
+  const hand = new THREE.Group();
+  hand.position.copy(grip);
+  const z = new THREE.Vector3(...handleDirArr).normalize();
+  const y = new THREE.Vector3().subVectors(grip, elbow).normalize(); // local +Y away from forearm
+  y.addScaledVector(z, -y.dot(z)).normalize(); // orthogonalize against handle axis
+  const x = new THREE.Vector3().crossVectors(y, z).normalize();
+  hand.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  buildGripHand(hand, opts);
+  g.add(hand);
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; } });
+  return g;
+}
+
 // Replace a rig's placeholder weapon body with a GLB, fitted by its
 // rest-pose bbox: rotated muzzle-to--Z, scaled to `length` meters, then
 // positioned so the bbox rear lands at `rearZ` and its vertical center at
@@ -132,6 +206,196 @@ function swapInGLB(rig, placeholder, url, { length, rearZ, centerY, preRot = nul
     .catch((e) => console.warn(`[viewmodel] GLB swap failed (${url}):`, e));
 }
 
+// Replace a rig's procedural mitten arms with the DJMaesen FPS arms GLB
+// (CC-BY 4.0, gloved, full finger rig, bind pose reaching +Z). Same
+// placeholder pattern as swapInGLB: mittens render until the GLB lands.
+// Options: pos (rig-local wrap position), zReach (target arm length m),
+// squeezeX (pull hands toward centerline for narrow grips), collapseLeft
+// (scale the left arm bone to zero — one-handed weapons).
+const ARMS_URL = '/models/fps_arms/scene.gltf';
+
+// Finger map: our key -> the GLB's finger-bone prefix (index is "point",
+// pinky is "pink"). Each finger has 4 segments; we curl the first three.
+const FINGER_PREFIX = { thumb: 'thumb', index: 'point', middle: 'middle', ring: 'ring', pinky: 'pink' };
+
+// A believable default grip: support hand fully wrapped, trigger hand wrapped
+// but index nearly straight (resting toward the trigger). Tuned live via the
+// hand-pose tuner (press H), then saved to localStorage['handpose.<weapon>'].
+function defaultGripPose() {
+  const handDefault = (index) => ({
+    arm: { x: 0, y: 0, z: 0 },     // whole-arm (shoulder) rotation
+    elbow: { x: 0, y: 0, z: 0 },   // elbow bend
+    wrist: { x: 0, y: 0, z: 0 },   // wrist orientation
+    thumb: 0.45, index, fingers: 0.85,
+  });
+  return {
+    axis: 'z', sign: 1,
+    // Whole-arms placement (offset on top of the auto wrist-to-grip fit).
+    rig: { px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0, scale: 1 },
+    R: handDefault(0.15),
+    L: handDefault(0.85),
+  };
+}
+
+// Deep-merge a saved pose over the current defaults so newly-added fields
+// (arm/elbow/rig placement) always exist on older saved poses.
+function mergePose(def, s) {
+  const out = { ...def, ...s };
+  out.rig = { ...def.rig, ...(s.rig || {}) };
+  for (const side of ['R', 'L']) {
+    const sd = s[side] || {};
+    out[side] = { ...def[side], ...sd };
+    out[side].arm = { ...def[side].arm, ...(sd.arm || {}) };
+    out[side].elbow = { ...def[side].elbow, ...(sd.elbow || {}) };
+    out[side].wrist = { ...def[side].wrist, ...(sd.wrist || {}) };
+  }
+  return out;
+}
+
+// Build the poseable hand rig: locate the arm/elbow/wrist + finger-segment
+// bones per side, capture their bind rotations, and expose applyPose(pose).
+// Controls (all additive on the auto wrist-to-grip fit):
+//   • rig: whole-arms position/rotation/scale (the `wrap` group)
+//   • per side: arm (shoulder) rot, elbow rot, wrist rot, finger curls
+function buildHandRig(rig, arms, wrap, name) {
+  const byName = {};
+  arms.traverse((o) => { if (o.isBone) byName[o.name] = o; });
+  const seg = (side, fp, i) => {
+    const k = Object.keys(byName).find((n) => n.startsWith(`${side}_${fp}${i}_`));
+    return k ? byName[k] : null;
+  };
+  const boneRe = (side, re) => Object.values(byName).find((b) => re.test(b.name) && b.name.startsWith(side + '_')) || null;
+  const bind = new Map();
+  const cap = (b) => { if (b) bind.set(b, { x: b.rotation.x, y: b.rotation.y, z: b.rotation.z }); };
+
+  const sides = {};
+  for (const side of ['R', 'L']) {
+    const armB = boneRe(side, /_arm/);
+    const elbowB = boneRe(side, /_elbow/);
+    const wrist = boneRe(side, /_wrist/);
+    [armB, elbowB, wrist].forEach(cap);
+    const fingers = {};
+    for (const key in FINGER_PREFIX) {
+      const segs = [1, 2, 3, 4].map((i) => seg(side, FINGER_PREFIX[key], i)).filter(Boolean);
+      segs.forEach(cap);
+      fingers[key] = segs;
+    }
+    sides[side] = { arm: armB, elbow: elbowB, wrist, fingers };
+  }
+
+  let pose = defaultGripPose();
+  try { const s = JSON.parse(localStorage.getItem('handpose.' + name)); if (s) pose = mergePose(pose, s); } catch {}
+
+  const wrapBase = { pos: wrap.position.clone(), rot: wrap.rotation.clone(), scale: wrap.scale.clone() };
+
+  rig.handRig = {
+    R: sides.R, L: sides.L, name, pose, wrap, wrapBase,
+    setBone(bone, off) {
+      if (!bone || !off) return;
+      const b = bind.get(bone);
+      bone.rotation.set(b.x + (off.x || 0), b.y + (off.y || 0), b.z + (off.z || 0));
+    },
+    applyPose(p) {
+      // whole-arms placement (offset on top of the fitted base)
+      const rg = p.rig || {};
+      const sc = rg.scale ?? 1;
+      this.wrap.position.set(wrapBase.pos.x + (rg.px || 0), wrapBase.pos.y + (rg.py || 0), wrapBase.pos.z + (rg.pz || 0));
+      this.wrap.rotation.set(wrapBase.rot.x + (rg.rx || 0), wrapBase.rot.y + (rg.ry || 0), wrapBase.rot.z + (rg.rz || 0));
+      this.wrap.scale.set(wrapBase.scale.x * sc, wrapBase.scale.y * sc, wrapBase.scale.z * sc);
+
+      const ax = p.axis || 'z', sg = p.sign ?? 1;
+      for (const side of ['R', 'L']) {
+        const h = this[side], ps = p[side];
+        if (!h || !ps) continue;
+        this.setBone(h.arm, ps.arm);
+        this.setBone(h.elbow, ps.elbow);
+        this.setBone(h.wrist, ps.wrist);
+        for (const fkey in h.fingers) {
+          const curl = fkey === 'thumb' ? ps.thumb : fkey === 'index' ? ps.index : ps.fingers;
+          h.fingers[fkey].forEach((s, i) => {
+            if (i > 2) return; // tip segment stays
+            const b = bind.get(s); if (!b) return;
+            const w = [1.0, 0.9, 0.7][i];
+            s.rotation.set(b.x, b.y, b.z);
+            s.rotation[ax] = b[ax] + (curl || 0) * sg * w * 1.4; // up to ~80°
+          });
+        }
+      }
+    },
+  };
+  rig.handRig.applyPose(pose);
+}
+
+function attachArms(rig, placeholderArms, { gripR, gripL = null, zReach = 0.62, squeezeX = 1, collapseLeft = false, tilt = 0, name = 'weapon' }) {
+  loadGLB(ARMS_URL)
+    .then((gltf) => {
+      const arms = cloneSkinned(gltf.scene);
+      const wrap = new THREE.Group();
+      wrap.name = 'armsGLB';
+      wrap.add(arms);
+      // rotate hands from +Z (authored) to -Z (our forward), then scale
+      arms.rotation.y = Math.PI;
+      const raw = measureRestBox(arms);
+      const s = zReach / raw.getSize(new THREE.Vector3()).z;
+      wrap.scale.set(s * squeezeX, s, s);
+      // DETERMINISTIC two-point fit on the WRIST BONES (bbox anchoring
+      // failed: the box top is the shoulders, so hands floated under every
+      // grip). 1) translate so the RIGHT wrist lands exactly on the firing
+      // grip; 2) yaw the wrap so the LEFT wrist aims at the support grip
+      // (rotation moves the right wrist, so re-pin it after). Grip targets
+      // are the same coordinates the procedural mitten hands used.
+      const wristOf = (side) => {
+        let pos = null;
+        arms.traverse((o) => {
+          if (!pos && o.isBone && o.name.startsWith(side) && /wrist/i.test(o.name)) {
+            pos = o.getWorldPosition(new THREE.Vector3());
+          }
+        });
+        return pos;
+      };
+      const pinRight = () => {
+        wrap.updateMatrixWorld(true);
+        const rw = wristOf('R');
+        if (rw) wrap.position.add(gripR.clone().sub(rw));
+      };
+      pinRight();
+      if (gripL) {
+        wrap.updateMatrixWorld(true);
+        const rw = wristOf('R');
+        const lw = wristOf('L');
+        if (rw && lw) {
+          // YAW-ONLY alignment of the wrist axis to the grip axis. Full 3D
+          // (setFromUnitVectors) was tried and rejected: the pitch swings
+          // the chest/shoulder mass up into the near plane and floods the
+          // whole view. The leftover vertical offset is fine — the support
+          // hand cradles the handguard from below, like a real grip.
+          const cur = lw.sub(rw);
+          const des = gripL.clone().sub(gripR);
+          wrap.rotation.y = Math.atan2(des.x, des.z) - Math.atan2(cur.x, cur.z);
+          pinRight(); // the yaw moved the right wrist — re-pin
+        }
+      }
+      wrap.rotateX(tilt);
+      if (collapseLeft) {
+        const lArm = arms.getObjectByName('L_arm_02');
+        if (lArm) lArm.scale.setScalar(0.0001);
+      }
+      wrap.traverse((o) => {
+        if (o.isMesh || o.isSkinnedMesh) {
+          o.castShadow = false;
+          o.receiveShadow = false;
+          o.frustumCulled = false; // tiny vm scene — skip stale-bounds risk
+        }
+      });
+      // Pose the fingers/wrist onto the grip (was bind-pose before — rigid,
+      // straight fingers). Tunable live via the hand-pose tuner (press H).
+      buildHandRig(rig, arms, wrap, name);
+      placeholderArms.forEach((a) => rig.group.remove(a));
+      rig.group.add(wrap);
+    })
+    .catch((e) => console.warn('[viewmodel] arms GLB failed, mittens stay:', e));
+}
+
 // ---------------------------------------------------------------------------
 export function buildKnife() {
   const group = new THREE.Group();
@@ -148,18 +412,25 @@ export function buildKnife() {
   pommel.position.set(0, 0, 0.108);
   group.add(pommel);
 
-  group.add(arm([0.14, -0.34, 0.34], [0, -0.01, 0.05]));
+  const arms = [arm([0.14, -0.34, 0.34], [0, -0.01, 0.05])];
+  arms.forEach((a) => group.add(a));
 
   const muzzle = new THREE.Object3D(); // unused for melee, kept for interface
   muzzle.position.set(0, 0, -0.25);
   group.add(muzzle);
 
-  return {
+  const rig = {
     group,
     muzzle,
     basePos: new THREE.Vector3(0.24, -0.23, -0.42),
     baseRot: new THREE.Euler(0.1, -0.35, 0.12),
   };
+  attachArms(rig, arms, {
+    gripR: new THREE.Vector3(0, -0.01, 0.05), // knife handle (mitten target)
+    zReach: 0.5,
+    collapseLeft: true,
+  });
+  return rig;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,8 +449,11 @@ export function buildPistol() {
   placeholder.add(box(0.006, 0.03, 0.005, MATS.polymer, 0, -0.032, -0.068)); // trigger guard front
   group.add(placeholder);
 
-  group.add(arm([0.13, -0.36, 0.36], [0.0, -0.07, 0.03])); // firing hand
-  group.add(arm([-0.24, -0.38, 0.26], [-0.025, -0.095, 0.035])); // support hand
+  const arms = [
+    arm([0.13, -0.36, 0.36], [0.0, -0.07, 0.03]), // firing hand
+    arm([-0.24, -0.38, 0.26], [-0.025, -0.095, 0.035]), // support hand
+  ];
+  arms.forEach((a) => group.add(a));
 
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0.025, -0.168);
@@ -196,6 +470,14 @@ export function buildPistol() {
     rearZ: 0.045,
     centerY: -0.01,
     muzzleLift: 0.35,
+  });
+  // One-handed: the bind pose holds the wrists ~22 cm apart even squeezed —
+  // two hands can never meet on a pistol grip without bone surgery, and a
+  // single gloved shooting hand is a classic FPS look anyway.
+  attachArms(rig, arms, {
+    gripR: new THREE.Vector3(0, -0.07, 0.03), // pistol grip (mitten target)
+    zReach: 0.55,
+    collapseLeft: true,
   });
   return rig;
 }
@@ -233,8 +515,13 @@ export function buildRifle() {
   placeholder.add(box(0.006, 0.005, 0.06, MATS.metal, 0, -0.042, -0.02)); // trigger guard
   group.add(placeholder);
 
-  group.add(arm([0.13, -0.37, 0.38], [0.0, -0.08, 0.05])); // firing hand
-  group.add(arm([-0.26, -0.4, 0.18], [-0.01, -0.015, -0.3])); // support on handguard
+  // Procedural gloved hands (Phase v6 — GLB FPS arms removed). Trigger hand
+  // wraps the pistol grip (its handle runs along the tilted grip axis); support
+  // hand wraps the handguard tube (handle along the barrel/Z).
+  group.add(
+    glovedArm([0.17, -0.42, 0.44], [0, -0.055, 0.04], [0, 0.94, 0.34], { side: 'R', R: 0.017 }),
+    glovedArm([-0.3, -0.42, 0.16], [0, -0.002, -0.3], [0, 0, 1], { side: 'L', R: 0.03 })
+  );
 
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0.025, -0.625);
@@ -252,6 +539,7 @@ export function buildRifle() {
     centerY: 0.0,
     muzzleLift: 0.25,
   });
+  // No attachArms here anymore — the rifle uses procedural gloved hands above.
   return rig;
 }
 
@@ -267,8 +555,11 @@ export function buildRod() {
   placeholder.add(tube(0.016, 0.3, MATS.polymer, 0, 0, 0.18)); // handle
   group.add(placeholder);
 
-  group.add(arm([0.14, -0.35, 0.35], [0.0, -0.015, 0.16])); // rod hand
-  group.add(arm([-0.24, -0.4, 0.3], [-0.02, -0.03, 0.3])); // reel hand
+  const arms = [
+    arm([0.14, -0.35, 0.35], [0.0, -0.015, 0.16]), // rod hand
+    arm([-0.24, -0.4, 0.3], [-0.02, -0.03, 0.3]), // reel hand
+  ];
+  arms.forEach((a) => group.add(a));
 
   const muzzle = new THREE.Object3D(); // = rod tip (line anchor)
   muzzle.position.set(0, 0.02, -1.28);
@@ -286,6 +577,12 @@ export function buildRod() {
     centerY: 0.0,
     preRot: new THREE.Euler(-Math.PI / 2, 0, 0), // +Y length → -Z
     muzzleLift: 0,
+  });
+  attachArms(rig, arms, {
+    gripR: new THREE.Vector3(0, -0.015, 0.16), // rod hand (mitten target)
+    gripL: new THREE.Vector3(-0.02, -0.03, 0.3), // reel hand
+    zReach: 0.5,
+    squeezeX: 0.65, // hands stacked on the handle
   });
   return rig;
 }

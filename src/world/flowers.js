@@ -172,26 +172,58 @@ export async function createFlowers(scene, spawn = { x: 0, z: 8 }) {
     placed++;
   }
 
-  // --- One InstancedMesh per species.
+  // --- Per-CELL InstancedMeshes (perf fix 2026-06-11): one world-spanning
+  // mesh per species gave a bounding sphere the frustum could never reject,
+  // so every flower rendered every frame in BOTH scene passes (RenderPass +
+  // N8AO's depth/normal pre-pass) — measured 3.7M tris/frame, 34% of the
+  // whole spawn view. Bucketing by 80 m cell gives three tight spheres to
+  // cull, and updateFlowers() drops cells past 165 m outright (788-tri
+  // flowers are sub-pixel long before that).
+  const CELL = 80;
   const dummy = new THREE.Object3D();
   species.forEach((sp, idx) => {
     const list = perSpecies[idx];
     if (list.length === 0) return;
-    const im = new THREE.InstancedMesh(sp.geometry, sp.materials, list.length);
-    im.castShadow = false;
-    im.receiveShadow = true;
-    // Skipped by the water pre-passes (invisible through ripple distortion).
-    im.layers.set(WATER_EXCLUDED_LAYER);
+    const buckets = new Map();
+    for (const p of list) {
+      const key = `${Math.floor(p.x / CELL)},${Math.floor(p.z / CELL)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(p);
+    }
+    for (const pts of buckets.values()) {
+      const im = new THREE.InstancedMesh(sp.geometry, sp.materials, pts.length);
+      im.castShadow = false;
+      im.receiveShadow = true;
+      // Skipped by the water pre-passes (invisible through ripple distortion).
+      im.layers.set(WATER_EXCLUDED_LAYER);
 
-    list.forEach((p, i) => {
-      dummy.position.set(p.x, getHeight(p.x, p.z) - 0.01, p.z);
-      dummy.rotation.set(0, p.rot, 0);
-      dummy.scale.setScalar(p.scale);
-      dummy.updateMatrix();
-      im.setMatrixAt(i, dummy.matrix);
-    });
+      let cx = 0, cz = 0;
+      pts.forEach((p, i) => {
+        dummy.position.set(p.x, getHeight(p.x, p.z) - 0.01, p.z);
+        dummy.rotation.set(0, p.rot, 0);
+        dummy.scale.setScalar(p.scale);
+        dummy.updateMatrix();
+        im.setMatrixAt(i, dummy.matrix);
+        cx += p.x;
+        cz += p.z;
+      });
+      cx /= pts.length;
+      cz /= pts.length;
 
-    im.computeBoundingSphere();
-    scene.add(im);
+      im.computeBoundingSphere(); // r150+: accounts instance matrices
+      scene.add(im);
+      flowerCells.push({ mesh: im, x: cx, z: cz });
+    }
   });
+}
+
+// Distance cutoff for flower cells — called from the main loop.
+const flowerCells = []; // { mesh, x, z }
+const FLOWER_VIEW = 165;
+
+export function updateFlowers(cameraPos) {
+  for (const c of flowerCells) {
+    c.mesh.visible =
+      Math.hypot(c.x - cameraPos.x, c.z - cameraPos.z) < FLOWER_VIEW;
+  }
 }

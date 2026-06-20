@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Simple Water — lightweight large-area surface</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe0ec; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+      color: #0c2233; background: rgba(255,255,255,0.45);
+      border: 1px solid rgba(40,90,130,0.25);
+      border-radius: 8px; padding: 10px 12px; min-width: 180px;
+      backdrop-filter: blur(6px); user-select: none;
+    }
+    #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+    #hud .big { font-size: 20px; font-weight: 600; }
+    #hud .lbl { opacity: 0.7; }
+    #hud .val { font-variant-numeric: tabular-nums; }
+    #hud hr { border: 0; border-top: 1px solid rgba(40,90,130,0.2); margin: 8px 0; }
+    #hud .hint { opacity: 0.65; font-size: 11px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div class="row"><span class="lbl">FPS</span><span class="big val" id="fps">—</span></div>
+    <hr />
+    <div class="row"><span class="lbl">frame</span><span class="val" id="ms">—</span></div>
+    <div class="row"><span class="lbl">water tris</span><span class="val" id="tris">—</span></div>
+    <div class="hint">1000×1000m ocean + island<br />orbit: drag · scroll: zoom</div>
+  </div>
+  <script type="module" src="/src/spike/simplewater-demo.js"></script>
+</body>
+</html>

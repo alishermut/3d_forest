@@ -13,6 +13,7 @@ import {
   treeColliders,
   logColliders,
   worldTreeFlares,
+  setWorldTreeCanopyGlow,
 } from './world/trees.js';
 import {
   initPhysics,
@@ -23,13 +24,16 @@ import {
   getWaterLevel,
   PLAYER,
 } from './core/physics.js';
+// WATER_EXCLUDED_LAYER (+ getWaveHeight used by physics) still live in
+// water.js; the lake RENDERING is swapped to the Water Lab "Medium" surface.
+// Revert by pointing these four back at './world/water.js'.
+import { WATER_EXCLUDED_LAYER } from './world/water.js';
 import {
   createWater,
   updateWater,
   prepareWater,
   setWaterSize,
-  WATER_EXCLUDED_LAYER,
-} from './world/water.js';
+} from './world/waterLab.js';
 import { createRocks, rockColliders } from './world/rocks.js';
 import {
   createAtmosphere,
@@ -42,7 +46,7 @@ import {
 } from './world/atmosphere.js';
 import { createGrass, updateGrass } from './world/grass.js';
 import { createWheat, updateWheat } from './world/wheat.js';
-import { createFlowers } from './world/flowers.js';
+import { createFlowers, updateFlowers } from './world/flowers.js';
 import { createInsects, updateInsects } from './world/insects.js';
 import { createBirds, updateBirds, enableBirdCalls } from './world/birds.js';
 import { createFireflies, updateFireflies } from './world/fireflies.js';
@@ -50,6 +54,7 @@ import { createFish, updateFish } from './world/fish.js';
 import { createAnimals, updateAnimals } from './world/animals.js';
 import { createDust, updateDust } from './world/dust.js';
 import { WeaponSystem } from './weapons/weapons.js';
+import { toggleHandTuner } from './weapons/handTuner.js';
 
 // ---------------------------------------------------------------------------
 // Renderer
@@ -349,6 +354,7 @@ let weapons = null;
 // Fly mode (Phase 12): sandbox-style spectator. F toggles; leaving fly
 // drops the capsule at the camera's position and gravity takes over.
 let flyMode = false;
+let handTunerOpen = false;
 let wasSubmerged = false;
 const underwaterEl = document.getElementById('underwater');
 window.addEventListener('keydown', (e) => {
@@ -362,6 +368,14 @@ window.addEventListener('keydown', (e) => {
         camera.position.z
       );
     }
+  }
+  // Dev: hand-pose tuner for the equipped weapon's FPS arms. Releases pointer
+  // lock so the GUI is usable; press H again to close.
+  if (e.code === 'KeyH' && weapons) {
+    if (document.pointerLockElement) document.exitPointerLock();
+    handTunerOpen = toggleHandTuner(weapons.viewmodel);
+    // keep the "click to play" overlay hidden while tuning so the hands show
+    document.getElementById('prompt').classList.toggle('hidden', handTunerOpen);
   }
 });
 
@@ -384,7 +398,7 @@ player.onLock(() => {
   enableBirdCalls(); // same user gesture satisfies autoplay rules
 });
 player.onUnlock(() => {
-  prompt.classList.remove('hidden');
+  if (!handTunerOpen) prompt.classList.remove('hidden'); // stay hidden while tuning
   document.body.classList.remove('playing');
 });
 
@@ -477,6 +491,7 @@ function loop() {
   // With fog off there's nothing to hide the distance cutoff — disable it
   // (frustum culling still drops cells behind the camera).
   updateTrees(clock.elapsedTime, camera.position, fogEnabled ? 110 : Infinity);
+  updateFlowers(camera.position); // distance-culls flower cells (perf fix)
   updateGrass(clock.elapsedTime, camera.position);
   updateWheat(clock.elapsedTime, camera.position); // pos: near-field densifier
   updateInsects(clock.elapsedTime);
@@ -512,6 +527,9 @@ function loop() {
   }
   // Godrays need the sun's shadow map — gate on daytime AND user intent.
   godraysPass.enabled = raysUserOn && sky.sunUp;
+  // World-tree canopy bounce-light fake follows the live sun (Phase 39 v14):
+  // full at noon, fades through golden hour, off at night.
+  setWorldTreeCanopyGlow(THREE.MathUtils.clamp(atmosphere.sun.intensity / 5.5, 0.04, 1));
   // Exposure curve: bright day, +golden hour, dimmer night.
   renderer.toneMappingExposure = getExposure();
   // Phase 30: HUD cycle state (DAY / NIGHT / transitioning).
@@ -539,6 +557,7 @@ async function init() {
     SPAWN
   );
   weapons = new WeaponSystem({ scene, camera, player, hud });
+  window.__weapons = weapons; // debug handle (hand-pose tuner, etc.)
   renderer.setAnimationLoop(loop);
 }
 init().catch((e) => {

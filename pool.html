@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Pool Spike — WebGL water (Evan Wallace approach)</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0c1320; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+      color: #eaf4ff; background: rgba(10, 22, 38, 0.5);
+      border: 1px solid rgba(180, 220, 255, 0.22);
+      border-radius: 8px; padding: 10px 12px; min-width: 180px;
+      backdrop-filter: blur(6px); user-select: none;
+    }
+    #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+    #hud .big { font-size: 20px; font-weight: 600; color: #fff; }
+    #hud .lbl { opacity: 0.7; }
+    #hud .val { font-variant-numeric: tabular-nums; }
+    #hud hr { border: 0; border-top: 1px solid rgba(180,220,255,0.18); margin: 8px 0; }
+    #hud .hint { opacity: 0.6; font-size: 11px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div class="row"><span class="lbl">FPS</span><span class="big val" id="fps">—</span></div>
+    <hr />
+    <div class="row"><span class="lbl">frame</span><span class="val" id="ms">—</span></div>
+    <div class="hint">click / drag the water to make ripples<br />orbit: drag · scroll: zoom</div>
+  </div>
+  <script type="module" src="/src/spike/pool.js"></script>
+</body>
+</html>

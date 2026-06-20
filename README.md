@@ -81,6 +81,8 @@ to add to your tally.
   [Quaternius](https://quaternius.com) — CC0.
 - *Cottontail rabbit* and *Jackrabbit* models by **Poly by Google** —
   [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- *First Person arms* by [DJMaesen](https://sketchfab.com/bumstrum) —
+  [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Gunshot samples from michorvath's CC0 pack on freesound.org.
 - Trees/flowers/ambience from [ez-tree](https://github.com/dgreenheck/ez-tree)
   (MIT); ground/rock textures from Poly Haven (CC0).

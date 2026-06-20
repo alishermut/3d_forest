@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Water Lab — quality tuner + benchmark</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe0ec; }
+    canvas { display: block; }
+    .panel {
+      position: fixed; z-index: 10;
+      font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+      color: #0c2233; background: rgba(255,255,255,0.5);
+      border: 1px solid rgba(40,90,130,0.25);
+      border-radius: 8px; padding: 10px 12px;
+      backdrop-filter: blur(6px); user-select: none;
+    }
+    #perf { top: 12px; left: 12px; min-width: 188px; }
+    #perf .row { display: flex; justify-content: space-between; gap: 14px; }
+    #perf .big { font-size: 22px; font-weight: 700; }
+    #perf .lbl { opacity: 0.7; }
+    #perf .val { font-variant-numeric: tabular-nums; }
+    #perf hr { border: 0; border-top: 1px solid rgba(40,90,130,0.2); margin: 7px 0; }
+    #results { bottom: 12px; left: 12px; max-width: 360px; max-height: 38vh; overflow:auto; }
+    #results table { border-collapse: collapse; width: 100%; }
+    #results th, #results td { text-align: right; padding: 2px 6px; border-bottom: 1px solid rgba(40,90,130,0.15); }
+    #results th:first-child, #results td:first-child { text-align: left; }
+    #results .empty { opacity: 0.55; }
+    .hint { opacity: 0.6; font-size: 11px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="perf" class="panel">
+    <div class="row"><span class="lbl">FPS</span><span class="big val" id="fps">—</span></div>
+    <hr />
+    <div class="row"><span class="lbl">frame</span><span class="val" id="ms">—</span></div>
+    <div class="row"><span class="lbl">water tris</span><span class="val" id="tris">—</span></div>
+    <div class="row"><span class="lbl">draw calls</span><span class="val" id="calls">—</span></div>
+    <div class="row"><span class="lbl">resolution</span><span class="val" id="res">—</span></div>
+    <div class="row"><span class="lbl">preset</span><span class="val" id="preset">—</span></div>
+    <div class="hint" id="bench">drag: orbit · scroll: zoom</div>
+  </div>
+  <div id="results" class="panel">
+    <div style="font-weight:700;margin-bottom:4px">Benchmark results</div>
+    <table id="restable"><tbody><tr class="empty"><td colspan="5">run a benchmark to record a row</td></tr></tbody></table>
+  </div>
+  <script type="module" src="/src/spike/waterlab.js"></script>
+</body>
+</html>
