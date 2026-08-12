@@ -27,7 +27,12 @@ const DENSE_LAYERS = 2;        // extra layers on top of the base field = 3x
 const DENSE_PER_LAYER = 95000; // base density (~9.3/m^2) x pi*55^2, rounded up
 const DENSE_POOL = DENSE_PER_LAYER * DENSE_LAYERS;
 const DENSIFY_RADIUS = 55;     // m around the player
-const DENSE_PER_FRAME = 8000;  // full pool sweep every ~24 frames (~0.4 s)
+const DENSE_PER_FRAME = 6000;  // full pool sweep every ~32 frames (reduced for perf)
+
+// Performance: track last scan position to skip work when player is stationary
+let lastScanX = 0;
+let lastScanZ = 0;
+const SCAN_THRESHOLD_SQ = 0.3 * 0.3;
 
 function mulberry32(seed) {
   return function () {
@@ -332,6 +337,13 @@ export function updateWheat(elapsedTime, playerPos) {
     return;
   }
   denseMesh.visible = true;
+
+  // Performance: skip expensive scanning when player hasn't moved much
+  const dx = playerPos.x - lastScanX;
+  const dz = playerPos.z - lastScanZ;
+  if (dx * dx + dz * dz < SCAN_THRESHOLD_SQ) return;
+  lastScanX = playerPos.x;
+  lastScanZ = playerPos.z;
 
   const start = denseCursor;
   const end = Math.min(start + DENSE_PER_FRAME, DENSE_POOL);

@@ -21,8 +21,13 @@ import { getWheat } from './biomes.js';
 
 const COUNT = 260000;
 const RADIUS = 70;            // grass lives within this distance of the player
-const BLADES_PER_FRAME = 6000; // relocation scan block size
+const BLADES_PER_FRAME = 4500; // relocation scan block size (reduced from 6000)
 const BLADE_HEIGHT = 0.5;
+
+// Performance: track last scan position to skip work when player is stationary
+let lastScanX = 0;
+let lastScanZ = 0;
+const SCAN_THRESHOLD_SQ = 0.25 * 0.25; // only scan when moved > 0.25m
 
 function mulberry32(seed) {
   return function () {
@@ -152,6 +157,13 @@ export function updateGrass(elapsedTime, playerPos) {
   if (shader) shader.uniforms.uTime.value = elapsedTime;
   if (!playerPos || !grassMesh) return;
 
+  // Performance: skip expensive scanning when player hasn't moved much
+  const dx = playerPos.x - lastScanX;
+  const dz = playerPos.z - lastScanZ;
+  if (dx * dx + dz * dz < SCAN_THRESHOLD_SQ) return;
+  lastScanX = playerPos.x;
+  lastScanZ = playerPos.z;
+
   // Scan one contiguous block per frame; relocate blades that fell behind.
   const start = scanCursor;
   const end = Math.min(start + BLADES_PER_FRAME, COUNT);
@@ -160,9 +172,9 @@ export function updateGrass(elapsedTime, playerPos) {
 
   for (let i = start; i < end; i++) {
     grassMesh.getMatrixAt(i, m);
-    const dx = m.elements[12] - playerPos.x;
-    const dz = m.elements[14] - playerPos.z;
-    if (dx * dx + dz * dz > RADIUS * RADIUS * 1.1) {
+    const dxi = m.elements[12] - playerPos.x;
+    const dzi = m.elements[14] - playerPos.z;
+    if (dxi * dxi + dzi * dzi > RADIUS * RADIUS * 1.1) {
       placeBlade(i, playerPos.x, playerPos.z);
       relocated++;
     }

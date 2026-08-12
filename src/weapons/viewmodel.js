@@ -140,6 +140,8 @@ export class Viewmodel {
   triggerRecoil(strength) {
     this.recoilVelZ += 1.5 * strength;
     this.recoilVelRot += 9 * strength;
+    // Firing pose feedback: trigger the finger curl response
+    this.firingPulse = Math.min(1, (this.firingPulse || 0) + 0.8);
   }
 
   flash() {
@@ -167,6 +169,27 @@ export class Viewmodel {
     this.recoilZ += this.recoilVelZ * dt;
     this.recoilVelRot += (-KS * this.recoilRot - CD * this.recoilVelRot) * dt;
     this.recoilRot += this.recoilVelRot * dt;
+
+    // --- firing pulse decay (trigger finger response) ---
+    if (this.firingPulse > 0.001) {
+      this.firingPulse *= Math.exp(-12 * dt);
+      // Apply to hand rig if available: tighten grip and pull trigger finger
+      if (rig.handRig) {
+        const hr = rig.handRig;
+        const basePose = hr.pose;
+        // Create a temporary pose with increased finger curl during firing
+        const firingPose = JSON.parse(JSON.stringify(basePose));
+        const fp = this.firingPulse;
+        if (firingPose.R) {
+          firingPose.R.index = Math.min(1, (basePose.R.index || 0.15) + fp * 0.65);
+          firingPose.R.fingers = Math.min(1, (basePose.R.fingers || 0.85) + fp * 0.1);
+        }
+        hr.applyPose(firingPose);
+      }
+    } else if (rig.handRig) {
+      // Reapply idle pose when not firing
+      rig.handRig.applyPose(rig.handRig.pose);
+    }
 
     // --- walk bob (synced to the head-bob phase) ---------------------------
     const bobK = Math.min(ctx.speed / 4.2, 1.6);
@@ -242,6 +265,18 @@ export class Viewmodel {
       }
       p.x += dx; p.y += dy; p.z += dz;
       r.x += rx; r.z += rz;
+
+      // Tighten grip during strike phase
+      if (rig.handRig && t >= 0.2 && t < 0.7) {
+        const grip = smooth((t - 0.2) / 0.15) * (1 - smooth((t - 0.5) / 0.2));
+        const attackPose = JSON.parse(JSON.stringify(rig.handRig.pose));
+        if (attackPose.R) {
+          attackPose.R.fingers = Math.min(1, (attackPose.R.fingers || 0.9) + grip * 0.1);
+          attackPose.R.thumb = Math.min(1, (attackPose.R.thumb || 0.55) + grip * 0.15);
+        }
+        rig.handRig.applyPose(attackPose);
+      }
+
       if (t >= 1) this.attackAnim = null;
     }
 
