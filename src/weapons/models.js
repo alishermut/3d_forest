@@ -94,12 +94,14 @@ function arm(elbow, grip) {
   const w = new THREE.Vector3(...grip);
   // sleeve covers the first 70 % of the limb, skin the rest
   const mid = e.clone().lerp(w, 0.68);
-  g.add(limb(e, mid, 0.062, 0.05, MATS.sleeve));
-  g.add(limb(mid, w, 0.046, 0.038, MATS.skin));
+  const sleeve = limb(e, mid, 0.062, 0.05, MATS.sleeve);
+  const wrist = limb(mid, w, 0.046, 0.038, MATS.skin);
   const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), MATS.skin);
   hand.scale.set(0.85, 0.75, 1.15);
   hand.position.copy(w);
-  g.add(hand);
+  // Disable frustum culling for viewmodel meshes
+  [sleeve, wrist, hand].forEach((m) => { m.frustumCulled = false; });
+  g.add(sleeve, wrist, hand);
   return g;
 }
 
@@ -459,20 +461,30 @@ function attachArms(rig, placeholderArms, { gripR, gripL = null, zReach = 0.62, 
 export function buildKnife() {
   const group = new THREE.Group();
 
-  group.add(tube(0.016, 0.11, MATS.polymer, 0, 0, 0.05)); // handle
-  group.add(box(0.055, 0.02, 0.016, MATS.metal, 0, 0, -0.008)); // guard
-  group.add(box(0.007, 0.036, 0.19, MATS.blade, 0, 0.004, -0.105)); // blade
+  // Knife geometry - disable frustum culling since the viewmodel camera is tiny
+  const handle = tube(0.016, 0.11, MATS.polymer, 0, 0, 0.05);
+  const guard = box(0.055, 0.02, 0.016, MATS.metal, 0, 0, -0.008);
+  const blade = box(0.007, 0.036, 0.19, MATS.blade, 0, 0.004, -0.105);
   const tip = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.06, 8), MATS.blade);
   tip.rotation.x = -Math.PI / 2;
   tip.scale.x = 0.2;
   tip.position.set(0, 0.004, -0.228);
-  group.add(tip);
   const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), MATS.metal);
   pommel.position.set(0, 0, 0.108);
-  group.add(pommel);
+
+  // Disable frustum culling on all knife meshes to prevent them being culled
+  // in the viewmodel's small dedicated scene
+  [handle, guard, blade, tip, pommel].forEach((m) => {
+    m.frustumCulled = false;
+    group.add(m);
+  });
 
   const arms = [arm([0.14, -0.34, 0.34], [0, -0.01, 0.05])];
-  arms.forEach((a) => group.add(a));
+  // Disable frustum culling on arm meshes too
+  arms.forEach((a) => {
+    a.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+    group.add(a);
+  });
 
   const muzzle = new THREE.Object3D(); // unused for melee, kept for interface
   muzzle.position.set(0, 0, -0.25);
@@ -498,15 +510,19 @@ export function buildPistol() {
   const group = new THREE.Group();
 
   const placeholder = new THREE.Group();
-  placeholder.add(box(0.034, 0.04, 0.2, MATS.metal, 0, 0.025, -0.06)); // slide
-  placeholder.add(box(0.008, 0.012, 0.01, MATS.metalDark, 0, 0.051, -0.15)); // front sight
-  placeholder.add(box(0.02, 0.012, 0.012, MATS.metalDark, 0, 0.051, 0.03)); // rear sight
-  placeholder.add(box(0.032, 0.024, 0.15, MATS.polymer, 0, -0.006, -0.05)); // frame
+  const parts = [
+    box(0.034, 0.04, 0.2, MATS.metal, 0, 0.025, -0.06), // slide
+    box(0.008, 0.012, 0.01, MATS.metalDark, 0, 0.051, -0.15), // front sight
+    box(0.02, 0.012, 0.012, MATS.metalDark, 0, 0.051, 0.03), // rear sight
+    box(0.032, 0.024, 0.15, MATS.polymer, 0, -0.006, -0.05), // frame
+  ];
   const grip = box(0.034, 0.12, 0.055, MATS.polymer, 0, -0.07, 0.022);
   grip.rotation.x = 0.28;
-  placeholder.add(grip);
-  placeholder.add(box(0.006, 0.005, 0.05, MATS.polymer, 0, -0.045, -0.045)); // trigger guard bottom
-  placeholder.add(box(0.006, 0.03, 0.005, MATS.polymer, 0, -0.032, -0.068)); // trigger guard front
+  parts.push(grip);
+  parts.push(box(0.006, 0.005, 0.05, MATS.polymer, 0, -0.045, -0.045)); // trigger guard bottom
+  parts.push(box(0.006, 0.03, 0.005, MATS.polymer, 0, -0.032, -0.068)); // trigger guard front
+  // Disable frustum culling for viewmodel meshes
+  parts.forEach((m) => { m.frustumCulled = false; placeholder.add(m); });
   group.add(placeholder);
 
   const arms = [
