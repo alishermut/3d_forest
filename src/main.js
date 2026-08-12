@@ -196,12 +196,14 @@ composer.addPass(aoPass);
 // and distant trees bleached to cream. Lower density pushes saturation past
 // ~150 m and the lower cap keeps far silhouettes readable; in-forest shafts
 // are short-range occlusion contrast and keep their punch.
+// Performance (2026-08-12): reduced raymarch steps from 60 to 45 — visually
+// equivalent through the forest canopy, ~25% faster godrays pass.
 const godraysPass = new GodraysPass(atmosphere.sun, camera, {
   density: 1 / 180,
   maxDensity: 0.23,
   distanceAttenuation: 2.4,
   color: new THREE.Color(0xfff0d2),
-  raymarchSteps: 60,
+  raymarchSteps: 45,
   blur: true,
   gammaCorrection: false,
 });
