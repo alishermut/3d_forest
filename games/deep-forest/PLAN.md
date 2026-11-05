@@ -1756,3 +1756,198 @@ ASCII renders. In-hand look in motion is the user's checkpoint.
 | 51 — Bite + fight | done — awaiting user check |
 | 52 — Catch presentation | done — awaiting user check |
 | 53 — Audio + polish | done — awaiting user check (ARC COMPLETE) |
+
+---
+
+# v6 — TESTING-GROUND ARC (planned 2026-11-05)
+
+Deep Forest becomes the **mechanics testing ground**: hands and weapons that
+look right, a proper movement set (jump / crouch / crawl) with a test yard,
+an ocean on the east third of the map with real swimming and underwater
+life, adjustable waves, and a weather system from clear to storm.
+
+Ground rules for this arc:
+- **Map size stays 900 m.** No expansion. The ocean *replaces* land, so the
+  tree and grass counts go DOWN and that should be a performance gain.
+- **Perf budget per phase.** Record fps / draw calls / triangles (F3) at
+  three fixed camera spots before and after every phase. Any phase that
+  costs more than ~10% has to earn it or get cut down.
+- **One settings panel** (lil-gui, already shipped inside three's addons, so
+  no new dependency) holds every tunable: time of day, rain, waves, wind.
+- Assets: prefer CC0; log every file in `public/models/LICENSES.md`.
+
+Findings that motivated this arc (viewmodel-only render, 2026-11-05):
+pistol, the right hand floats below the grip with only fingertips showing.
+Rifle, the left arm hangs separately under the gun and doesn't touch the
+handguard. Knife, two loose fingers beside the blade. Rod, no hands at all.
+The grip poses were hand-tuned into localStorage (H tuner), so they drift
+per browser and break when a weapon model changes.
+
+## Part A — Hands, weapons, sound
+
+## Phase 54 — Settings panel + perf baseline
+- [ ] lil-gui panel (toggle with `G`): time of day + speed. Later phases add
+      their own folders (Weather, Ocean, Movement).
+- [ ] Baseline perf table written into this file (3 camera spots).
+
+**CHECKPOINT 54:** panel opens, time slider moves the sun; baseline recorded.
+
+## Phase 55 — Arms that hold the weapons (IK rebuild)
+- [ ] Each weapon gets explicit **grip sockets**: `gripR` (pistol grip /
+      handle), `gripL` (handguard / under the pistol / rod butt), plus
+      `mag` and `muzzle`. Sockets are part of the weapon definition, not
+      tuned per browser.
+- [ ] **Two-bone IK** (shoulder → elbow → wrist) on the existing rigged
+      DJMaesen arms: wrists snap to the sockets every frame, so hands stay
+      on the gun through recoil, sway and reload. Elbow pole targets keep
+      the elbows natural.
+- [ ] Finger presets per grip type (pistol grip, rifle grip, handguard
+      cup, knife fist, rod hold), trigger finger on or off the trigger.
+- [ ] One-handed weapons (knife, pistol) still show the support hand where
+      it makes sense (pistol two-handed; knife off-hand relaxed or hidden).
+- [ ] Viewmodel lighting follows the scene's time of day (weapons currently
+      read near-black).
+- [ ] Retire the localStorage hand-pose tuner (keep H as a debug socket
+      viewer only).
+
+**CHECKPOINT 55:** all four items (knife, pistol, rifle, rod) render with
+both hands visibly gripping, at rest and while walking or sprinting.
+
+## Phase 56 — Weapon animation
+- [ ] Code-keyframed clips layered on the IK targets: draw / holster, idle
+      breathing, fire (recoil kick + recovery, pistol slide, rifle bolt),
+      reload (left hand pulls the mag, inserts it, racks), sprint (weapon
+      lowered), knife slash + stab combo.
+- [ ] Aim down sights on right mouse (deferred since v4): FOV zoom, weapon
+      moves to center, reduced sway.
+
+**CHECKPOINT 56:** every action looks intentional in motion (user check).
+
+## Phase 57 — Sound pass
+- [ ] Gunshots layered: close crack + environment tail (forest reverb;
+      later a wetter tail over the ocean).
+- [ ] Reload foley recorded, not synthesized: mag out, mag in, slide/bolt.
+- [ ] Knife swish / impact, rod cast and reel.
+- [ ] Footsteps per surface (grass, dirt, rock, sand, shallow water),
+      landing thump after a jump.
+- Risk: freesound downloads need a login. If the sandbox can't fetch, the
+  user downloads the chosen CC0 files and we commit them.
+
+**CHECKPOINT 57:** sounds match actions; no synth placeholders left in
+weapons or footsteps.
+
+## Part B — Movement
+
+## Phase 58 — Jump, crouch, crawl
+- [ ] Jump polish: coyote time, input buffering, landing camera dip.
+- [ ] Crouch (`C` toggle / hold `Ctrl`): capsule ~1.2 m, slower walk.
+      In water `C` keeps meaning "dive". In fly mode it still means
+      "descend".
+- [ ] Prone / crawl (`Z`): capsule ~0.6 m, slow crawl, weapon lowered,
+      crawl camera sway.
+- [ ] Ceiling check: you can't stand up under a log; smooth camera-height
+      blend between stances.
+- [ ] Stance indicator in the HUD.
+
+## Phase 59 — Movement test yard
+- [ ] A clearing near spawn with fallen logs at set clearances: crawl-under
+      (~0.7 m), crouch-under (~1.3 m), jump-over (~0.8 m), a balance-beam
+      log, stepped stumps. Reuses the Phase 23 log geometry and colliders.
+- [ ] Logs are tagged so stance tests are repeatable.
+
+**CHECKPOINT 58–59:** crawl under, crouch under, jump over, and you can't
+stand up while under a log.
+
+## Part C — Ocean
+
+## Phase 60 — Map reshape: east third becomes ocean
+- [ ] The coastline runs north–south around x ≈ +150 (noise-warped). The old
+      lake basin becomes a **bay** opening to the sea, and the island stays
+      offshore. Everything east of the coast is sea.
+- [ ] Sea-floor profile: beach → shallow sand shelf (0–4 m) → reef band →
+      drop-off to about −30 m near the world edge.
+- [ ] Beach band: sand layer in the terrain shader. Trees and grass masks
+      exclude the sand.
+- [ ] The deep-forest biome moves inland (north and south of the bay).
+- [ ] `getWaterLevel` returns sea level for the whole ocean; lake fish
+      become sea fish.
+
+**CHECKPOINT 60:** walk from the forest onto the beach and look out to an
+open horizon. Perf table should show fewer triangles.
+
+## Phase 61 — Ocean surface + waves setting
+- [ ] Camera-following ocean mesh. Start from `games/water-lab`'s
+      `simpleWater.js` (copied in, not imported): Gerstner swell, detail
+      normals, Fresnel sky reflection, sun glint, depth colour, shore foam.
+- [ ] A CPU `getWaveHeight` that matches the shader exactly, so the
+      player, the crate and the fishing bobber ride the same waves.
+- [ ] **Wave intensity** slider (calm → rough): amplitude, wavelength mix,
+      choppiness, foam amount. Weather can drive it (Phase 65).
+- [ ] The ocean runs past the terrain edge to the horizon, which hides the
+      east world edge.
+
+## Phase 62 — Swimming v2
+- [ ] Surface swimming vs diving. Underwater you swim where you look,
+      Space rises, C sinks.
+- [ ] Breath meter (HUD). Gasp when you surface. Optional drowning
+      damage later.
+- [ ] Waves bob and push you at the surface. Splash and stroke sounds.
+- [ ] Underwater mode: depth-tinted fog, caustics on the sea floor, light
+      shafts from the surface, low-passed audio, bubbles. The weapon is
+      holstered while swimming.
+
+## Phase 63 — Underwater life
+- [ ] Instanced kelp and sea grass with a sway shader, sea-floor rocks,
+      shells, sand ripples.
+- [ ] Fish schools (instanced boids) plus a few larger solo fish.
+- [ ] Small life on the floor: crabs, shrimp, sea-bugs (cheap procedural
+      motion, like the rabbits).
+- [ ] Budget: ≤ +6 draw calls. Everything frozen beyond underwater
+      visibility.
+
+**CHECKPOINT 60–63:** swim from the beach, dive along the reef, see life,
+surface into waves.
+
+## Part D — Sky and weather
+
+## Phase 64 — Day/night v2
+- [ ] Time of day + cycle speed live in the settings panel.
+- [ ] Moonlight path on the ocean; darker, bluer nights; stars over the sea.
+- [ ] (User to list any other day/night changes they want.)
+
+## Phase 65 — Weather: rain → storm
+- [ ] **Rain intensity** slider 0–1. 0 = clear, ~0.3 drizzle, ~0.6 rain,
+      1.0 storm.
+- [ ] Rain: GPU-animated streaks in a box around the camera. Splash
+      ripples on water. Thinner rain under the tree canopy.
+- [ ] Scene response: cloud cover and darkness ramp up, fog thickens, wet
+      ground/rocks (darker, glossier), wind ramps grass and tree sway.
+- [ ] Waves follow the weather (the wave slider can override).
+- [ ] Storm (≥ ~0.8): lightning flashes (sky + scene light), an occasional
+      visible bolt, thunder delayed by distance.
+- [ ] Audio: rain loop layers from light to heavy, plus wind and thunder.
+
+**CHECKPOINT 64–65:** drag rain from 0 to 1 and watch clear → drizzle →
+storm, with waves rising.
+
+## Phase 66 — Perf + polish pass
+- [ ] Re-run the perf table and fix any regressions.
+- [ ] Update `games/deep-forest/README.md` controls and features.
+
+## v6 Status
+
+| Phase | Status |
+|-------|--------|
+| 54 — Settings panel + perf baseline | planned |
+| 55 — Arms IK rebuild | planned |
+| 56 — Weapon animation | planned |
+| 57 — Sound pass | planned |
+| 58 — Jump / crouch / crawl | planned |
+| 59 — Movement test yard | planned |
+| 60 — Map reshape: ocean | planned |
+| 61 — Ocean surface + waves | planned |
+| 62 — Swimming v2 | planned |
+| 63 — Underwater life | planned |
+| 64 — Day/night v2 | planned |
+| 65 — Weather: rain → storm | planned |
+| 66 — Perf + polish | planned |
