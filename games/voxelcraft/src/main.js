@@ -6,7 +6,7 @@
 // replaces the fly controller with the full player controller (collision,
 // walk mode, gravity, jump).
 //
-// See src/minecraft/PLAN.md for the full arc.
+// See games/voxelcraft/PLAN.md for the full arc.
 
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';

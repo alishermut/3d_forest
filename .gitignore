@@ -1,6 +1,5 @@
 node_modules/
 .claude/
-CLAUDE.md
 dist/
 .DS_Store
 *.local

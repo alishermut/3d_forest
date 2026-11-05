@@ -1,8 +1,8 @@
 # Highlands — big stylized streamed world (subproject)
 
 A **separate world/mode** that lives alongside the Deep Forest without touching it.
-Own entry (`/highlands.html` → `/src/highlands/main.js`), own `src/highlands/`
-folder. The forest (`index.html` → `src/main.js`) is never modified.
+Own folder: `games/highlands/` (`index.html` → `src/main.js`). The forest
+(`games/deep-forest/`) is never modified.
 
 ## Vision
 

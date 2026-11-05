@@ -13,8 +13,8 @@
 // procedural RoomEnvironment lighting (no external HDR asset), a WebGPU
 // capability gate, and an FPS / live particle-count HUD.
 //
-// Throwaway: nothing here is imported by the game. Delete src/spike + the two
-// _ files once we commit to the architecture.
+// Throwaway: nothing here is imported by any game. Delete games/water-lab
+// once we commit to a water architecture.
 // ===========================================================================
 
 import * as THREE from 'three/webgpu';

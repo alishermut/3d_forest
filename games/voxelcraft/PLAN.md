@@ -1,9 +1,9 @@
 # Voxelcraft — Minecraft Clone
 
 A browser-based Minecraft clone built on the repo's existing stack (Three.js +
-Rapier + Vite). Lives under `src/minecraft/` with its own `minecraft.html`
-entry, isolated from the forest (`src/main.js`), highlands, packbrawl, and
-spike subprojects. No forest modules are imported — the voxel engine is
+Rapier + Vite). Lives in `games/voxelcraft/` (`index.html` → `src/main.js`),
+isolated from the other games (deep-forest, highlands, tetris, water-lab).
+(Paths in the phase checklists below predate the move from `src/minecraft/`.) No forest modules are imported — the voxel engine is
 architecturally incompatible with the heightmap world.
 
 **Scope (locked):** full 384-height Overworld · ~80 blocks · Creative + Survival

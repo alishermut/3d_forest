@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Forest</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    body.playing, body.playing * { cursor: none !important; }
+    #app canvas { display: block; }
+
+    #crosshair {
+      position: fixed; left: 50%; top: 50%;
+      width: 4px; height: 4px; margin: -2px 0 0 -2px;
+      border-radius: 50%; background: rgba(255, 255, 255, 0.6);
+      pointer-events: none; z-index: 10;
+    }
+
+    #prompt {
+      position: fixed; inset: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; cursor: pointer;
+      color: #dce5dc; font: 16px/1.6 system-ui, sans-serif;
+      background: rgba(8, 12, 10, 0.55);
+      letter-spacing: 0.04em;
+    }
+    #prompt h1 { font-size: 28px; font-weight: 600; margin: 0 0 8px; }
+    #prompt p { margin: 0; opacity: 0.7; font-size: 14px; }
+    #prompt.hidden { display: none; }
+
+    #stats {
+      position: fixed; top: 8px; left: 8px; z-index: 30;
+      color: #cfe3cf; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; white-space: pre; pointer-events: none;
+    }
+    #stats.hidden { display: none; }
+
+    #controls {
+      position: fixed; top: 104px; left: 8px; z-index: 30;
+      color: #cfe3cf; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; white-space: pre; pointer-events: none;
+    }
+    #controls.hidden { display: none; }
+    #controls b { font-weight: 600; }
+    #controls .on { color: #9fdd9f; }
+    #controls .off { color: #8a8a8a; }
+    #controls .dim { color: #93a393; }
+
+    #mode {
+      position: fixed; top: 8px; right: 8px; z-index: 30;
+      color: #ffe9b8; font: 12px/1.5 Consolas, monospace;
+      background: rgba(0, 0, 0, 0.45); padding: 6px 9px;
+      border-radius: 4px; pointer-events: none; letter-spacing: 0.12em;
+    }
+    #mode.hidden { display: none; }
+
+    #underwater {
+      position: fixed; inset: 0; z-index: 5; pointer-events: none;
+      background: rgba(24, 52, 60, 0.35);
+    }
+    #underwater.hidden { display: none; }
+
+    #ammo {
+      position: fixed; right: 18px; bottom: 14px; z-index: 10;
+      color: #e8e4d8; font: 600 19px/1.2 Consolas, monospace;
+      letter-spacing: 0.08em; pointer-events: none;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Fishing (Phase 51): line-tension bar above the ammo readout. */
+    #tension {
+      position: fixed; right: 18px; bottom: 46px; z-index: 10;
+      width: 170px; height: 9px; pointer-events: none;
+      background: rgba(8, 10, 8, 0.55);
+      border: 1px solid rgba(232, 228, 216, 0.35);
+      border-radius: 4px;
+    }
+    #tension.hidden { display: none; }
+    #tension > div {
+      height: 100%; width: 0%;
+      background: #7fc35a; border-radius: 3px;
+    }
+
+    /* Catch card (Phase 52): brief center-screen banner. */
+    #catchcard {
+      position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%);
+      z-index: 10; pointer-events: none;
+      color: #ffe9b8; font: 700 22px/1.3 Consolas, monospace;
+      letter-spacing: 0.1em; text-align: center;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+      opacity: 0; transition: opacity 220ms ease;
+    }
+    #catchcard.show { opacity: 1; }
+    #catchcard small { font-size: 14px; color: #d8d4c8; display: block; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="crosshair"></div>
+  <div id="prompt">
+    <div>
+      <h1>DEEP FOREST</h1>
+      <p>Click to enter &middot; WASD walk &middot; F1 controls panel</p>
+    </div>
+  </div>
+  <div id="stats"></div>
+  <div id="controls"></div>
+  <div id="mode" class="hidden">FLY</div>
+  <div id="underwater" class="hidden"></div>
+  <div id="ammo"></div>
+  <div id="tension" class="hidden"><div></div></div>
+  <div id="catchcard"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

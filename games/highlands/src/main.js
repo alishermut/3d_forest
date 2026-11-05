@@ -7,7 +7,7 @@
 // Right now this just proves the subproject lives and renders: a low-poly sky,
 // a flat ground plate, and a placeholder peak so there's something 3D in view.
 // The terrain engine, streaming, and everything else land in later phases
-// (see src/highlands/PLAN.md). Nothing here is meant to survive past phase 1 —
+// (see games/highlands/PLAN.md). Nothing here is meant to survive past phase 1 —
 // it's the skeleton we hang the real systems on.
 
 import * as THREE from 'three';
