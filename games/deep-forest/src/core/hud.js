@@ -65,7 +65,7 @@ export class Hud {
       `1-4·wheel  <b class="on">${s.weapon}</b>\n` +
       (s.catches > 0 ? `fish caught  <b class="on">${s.catches}</b>\n` : '') +
       `\n` +
-      `F1 this panel\n` +
+      `F1 this panel · G settings\n` +
       `F3 stats  ${onOff(s.stats)}\n` +
       `F4 AO     ${onOff(s.ao)}\n` +
       `F5 bloom  ${onOff(s.bloom)}\n` +

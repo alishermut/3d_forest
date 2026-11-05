@@ -48,8 +48,17 @@ for screenshots.
   water, atmosphere, wildlife), `src/weapons/` (weapons and fishing).
 - `getHeight(x, z)` in `src/world/terrain.js` is the single source of truth
   for ground height. Everything placed on the ground samples it.
-- Performance budget: keep heavy content instanced. The whole scene is about
-  20 draw calls. `F3` shows fps, draw calls and triangles.
+- Performance budget: keep heavy content instanced. Measure with the
+  benchmark (`G` → Performance → run benchmark), before and after each
+  phase. It reports GPU ms, CPU ms, draw calls and triangles at 4 fixed
+  spots. Frame totals across all passes are ~370–880 calls and 6–10 M
+  triangles (2026-11 baseline). `F3` shows live fps, calls and triangles.
+- `G` opens the settings panel (`src/core/settings.js`). New tunables go in
+  a folder there, not on new hotkeys.
+- Headless Chromium here uses software GL: Deep Forest renders at seconds
+  per frame, so perf numbers must come from the user's machine. To
+  screenshot, stop the loop (`__renderer.setAnimationLoop(null)`) or
+  render just the viewmodel.
 - Post-processing uses `postprocessing` (EffectComposer), `n8ao` and
   `three-good-godrays` on the WebGL renderer.
 - Physics is `@dimforge/rapier3d-compat`.

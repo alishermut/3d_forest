@@ -30,6 +30,7 @@ Assets (models, textures, audio, Draco decoder) live in the repo-root
 | `F` | Toggle fly mode (sandbox spectator, no collision) |
 | `Esc` | Release the mouse |
 | `F3` | Stats HUD (fps / draw calls / triangles) |
+| `G` | Settings panel (time of day, graphics toggles, benchmark) |
 | `F4` / `F5` / `F6` / `F7` | Toggle AO / bloom / god rays / fog |
 | `1` / `2` / `3` / `4` (or wheel) | Knife / pistol / rifle / fishing rod |
 | `LMB` | Fire — or with the rod: hold to charge a cast, release to throw |
@@ -95,8 +96,9 @@ Full per-file list in `public/models/LICENSES.md`.
 
 ## Performance notes
 
-- Everything heavy is instanced; the whole scene is ~20 draw calls and
-  ~10.5 M triangles.
+- Everything heavy is instanced. Counting every pass (shadows, AO,
+  god rays, viewmodel), a frame is ~370–880 draw calls and 6–10 M
+  triangles. Measure with `G` → Performance → run benchmark.
 - Leaves deliberately do not cast shadows: at this tree density the leaf
   cards are opaque to the shadow map and blanket the ground. The dense
   branch networks alone produce the dappled light.

@@ -4,6 +4,8 @@ import { N8AOPostPass } from 'n8ao';
 import { GodraysPass } from 'three-good-godrays';
 import { Stats } from './core/stats.js';
 import { Hud } from './core/hud.js';
+import { Settings } from './core/settings.js';
+import { Benchmark } from './core/benchmark.js';
 import { loadTexture } from './core/assets.js';
 import { PlayerControls } from './player/controls.js';
 import { getHeight, createTerrain, SPAWN } from './world/terrain.js';
@@ -292,34 +294,159 @@ function startCycleTransition() {
 }
 hud.onCycle = startCycleTransition; // HUD row click = same as N
 
+// ---------------------------------------------------------------------------
+// Settings panel (Phase 54) — G. Later phases add Weather / Ocean / Movement.
+// ---------------------------------------------------------------------------
+const settings = new Settings();
+// Benchmark state (fixed so runs are comparable): the shipped defaults —
+// fog off, morning, AO/bloom/rays on, no auto cycle. Restored afterwards.
+const benchmark = new Benchmark(renderer, camera, {
+  applyStandard() {
+    const prev = {
+      t: getTimeOfDay(),
+      fog: fogEnabled,
+      ao: aoPass.enabled,
+      bloom: bloomEffect.intensity > 0,
+      rays: raysUserOn,
+      auto: autoCycle,
+    };
+    autoCycle = false;
+    setTimeManual(CYCLE_DAY_T);
+    if (fogEnabled) setFog(false);
+    setAO(true);
+    setBloom(true);
+    setRays(true);
+    return () => {
+      autoCycle = prev.auto;
+      setTimeManual(prev.t);
+      if (fogEnabled !== prev.fog) setFog(prev.fog);
+      setAO(prev.ao);
+      setBloom(prev.bloom);
+      setRays(prev.rays);
+      settingsUI.sync();
+    };
+  },
+});
+// Continuous day cycle (off by default — the world holds its time).
+let autoCycle = false;
+let dayLengthMin = 10; // real minutes per in-game day
+
+const settingsUI = (() => {
+  const st = {
+    hour: getTimeOfDay() * 24,
+    autoCycle,
+    dayLengthMin,
+    ao: true,
+    bloom: true,
+    rays: true,
+    fog: fogEnabled,
+  };
+  const time = settings.folder('Time of day');
+  time.add(st, 'hour', 0, 24, 0.05).name('hour').onChange((h) => setTimeManual(h / 24));
+  time.add(st, 'autoCycle').name('auto cycle').onChange((v) => (autoCycle = v));
+  time.add(st, 'dayLengthMin', 1, 60, 1).name('day length (min)').onChange((v) => (dayLengthMin = v));
+  time.add({ go: () => startCycleTransition() }, 'go').name('sunset / sunrise  (N)');
+
+  const gfx = settings.folder('Graphics');
+  gfx.add(st, 'ao').name('ambient occlusion  (F4)').onChange(setAO);
+  gfx.add(st, 'bloom').name('bloom  (F5)').onChange(setBloom);
+  gfx.add(st, 'rays').name('god rays  (F6)').onChange(setRays);
+  gfx.add(st, 'fog').name('fog  (F7)').onChange(setFog);
+
+  const perf = settings.folder('Performance');
+  const out = document.createElement('pre');
+  out.style.cssText = 'margin:4px 8px 8px;white-space:pre-wrap;font:11px/1.4 monospace;color:#cfd8cf';
+  out.textContent = 'Visits 4 fixed spots (~25 s). Fixed state: fog off, 08:24, effects on.';
+  perf.add({ run: () => {
+    if (benchmark.running) return;
+    // Hide the panel + click-to-play overlay: both cost compositing time.
+    const promptEl = document.getElementById('prompt');
+    settings.toggle(false);
+    promptEl.classList.add('hidden');
+    out.textContent = 'running…';
+    benchmark.start(() => {
+      out.textContent = benchmark.summary();
+      settings.toggle(true);
+      if (!player.locked) promptEl.classList.remove('hidden');
+    });
+  } }, 'run').name('run benchmark');
+  perf.add({ copy: () => {
+    navigator.clipboard?.writeText(benchmark.markdown()).catch(() => {});
+  } }, 'copy').name('copy results (markdown)');
+  perf.$children.appendChild(out);
+
+  return {
+    // Pull live state back into the panel after a key toggle / transition.
+    sync() {
+      st.hour = getTimeOfDay() * 24;
+      st.ao = aoPass.enabled;
+      st.bloom = bloomEffect.intensity > 0;
+      st.rays = raysUserOn;
+      st.fog = fogEnabled;
+      settings.refresh();
+    },
+  };
+})();
+window.__game.settings = settings;
+window.__game.benchmark = benchmark;
+
+// Graphics toggles — shared by the F-keys and the settings panel (Phase 54).
+function setAO(on) {
+  aoPass.enabled = on;
+  hud.set('ao', on);
+}
+function setBloom(on) {
+  // Toggle the EFFECT, not the pass: bloom is the final pass in the
+  // chain, and disabling it leaves nothing rendering to screen (freeze).
+  bloomEffect.intensity = on ? BLOOM_INTENSITY : 0;
+  hud.set('bloom', on);
+}
+function setRays(on) {
+  // User INTENT only — the loop gates the actual pass on sun-up too
+  // (godrays sample the SUN's shadow map, which the moon owns at night).
+  raysUserOn = on;
+  hud.set('rays', on);
+}
+function setFog(on) {
+  fogEnabled = on;
+  scene.fog.density = fogEnabled ? FOG_DENSITY : 0;
+  // Fog on -> small crisp shadow window (fog hides its edge);
+  // fog off -> extended window so the edge sits past visual relevance.
+  atmosphere.setShadowRange(!fogEnabled);
+  // setShadowRange disposes/recreates the shadow map. The godrays pass
+  // binds the shadow depth texture once (shadowMapSet latch) — reset it so
+  // the pass rebinds the NEW texture instead of sampling a disposed one.
+  godraysPass.illumPass.shadowMapSet = false;
+  // Shadows are on-demand now — force a rebuild for the new map/window.
+  renderer.shadowMap.needsUpdate = true;
+  hud.set('fog', fogEnabled);
+}
+// Manual time set (scrub keys, panel slider). Cancels a running transition.
+function setTimeManual(t) {
+  cycleTransition = null;
+  setTimeOfDay(t);
+  renderer.shadowMap.needsUpdate = true;
+  hud.set('time', timeLabel());
+}
+
 window.addEventListener('keydown', (e) => {
   if (e.code === 'F4') {
     e.preventDefault();
-    aoPass.enabled = !aoPass.enabled;
-    hud.set('ao', aoPass.enabled);
+    setAO(!aoPass.enabled);
   }
   if (e.code === 'F5') {
     e.preventDefault();
-    // Toggle the EFFECT, not the pass: bloom is the final pass in the
-    // chain, and disabling it leaves nothing rendering to screen (freeze).
-    bloomEffect.intensity = bloomEffect.intensity > 0 ? 0 : BLOOM_INTENSITY;
-    hud.set('bloom', bloomEffect.intensity > 0);
+    setBloom(!(bloomEffect.intensity > 0));
   }
   if (e.code === 'F6') {
     e.preventDefault();
-    // User INTENT only — the loop gates the actual pass on sun-up too
-    // (godrays sample the SUN's shadow map, which the moon owns at night).
-    raysUserOn = !raysUserOn;
-    hud.set('rays', raysUserOn);
+    setRays(!raysUserOn);
   }
   // Phase 28 debug scrub: [ / ] step timeOfDay (hold for continuous).
   // Scrubbing cancels a running day-night transition (manual wins).
   if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
     e.preventDefault();
-    cycleTransition = null;
-    setTimeOfDay(getTimeOfDay() + (e.code === 'BracketLeft' ? -0.004 : 0.004));
-    renderer.shadowMap.needsUpdate = true;
-    hud.set('time', timeLabel());
+    setTimeManual(getTimeOfDay() + (e.code === 'BracketLeft' ? -0.004 : 0.004));
   }
   // Phase 30: the cinematic sunset/sunrise.
   if (e.code === 'KeyN') {
@@ -327,19 +454,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F7') {
     e.preventDefault();
-    fogEnabled = !fogEnabled;
-    scene.fog.density = fogEnabled ? FOG_DENSITY : 0;
-    // Fog on -> small crisp shadow window (fog hides its edge);
-    // fog off -> extended window so the edge sits past visual relevance.
-    atmosphere.setShadowRange(!fogEnabled);
-    // setShadowRange disposes/recreates the shadow map. The godrays pass
-    // binds the shadow depth texture once (shadowMapSet latch) — reset it so
-    // the pass rebinds the NEW texture instead of sampling a disposed one.
-    godraysPass.illumPass.shadowMapSet = false;
-    // Shadows are on-demand now — force a rebuild for the new map/window.
-    renderer.shadowMap.needsUpdate = true;
-    hud.set('fog', fogEnabled);
+    setFog(!fogEnabled);
   }
+  if (/^(F[4-7]|Bracket(Left|Right)|KeyN)$/.test(e.code)) settingsUI.sync();
 });
 
 // ---------------------------------------------------------------------------
@@ -429,6 +546,7 @@ renderer.shadowMap.autoUpdate = false;
 renderer.shadowMap.needsUpdate = true;
 
 function loop() {
+  benchmark.beginFrame();
   renderer.info.reset();
   const dt = Math.min(clock.getDelta(), 0.1);
 
@@ -518,6 +636,13 @@ function loop() {
     if (p >= 1) cycleTransition = null;
   }
 
+  // Phase 54: optional continuous cycle (a running N-transition wins).
+  if (autoCycle && !cycleTransition) {
+    setTimeOfDay(getTimeOfDay() + dt / (dayLengthMin * 60));
+    hud.set('time', timeLabel());
+  }
+  if (settings.visible && (autoCycle || cycleTransition)) settingsUI.sync();
+
   const sky = atmosphere.update(camera, clock.elapsedTime);
   if (sky.moved) renderer.shadowMap.needsUpdate = true;
   if (sky.swapped) {
@@ -546,6 +671,7 @@ function loop() {
   // geometry and never touches the composer's (fragile) depth pipeline.
   if (weapons) weapons.renderViewmodel(renderer);
   stats.update(dt);
+  benchmark.frame(dt);
 }
 
 async function init() {

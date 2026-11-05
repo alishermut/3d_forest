@@ -1786,11 +1786,58 @@ per browser and break when a weapon model changes.
 ## Part A — Hands, weapons, sound
 
 ## Phase 54 — Settings panel + perf baseline
-- [ ] lil-gui panel (toggle with `G`): time of day + speed. Later phases add
-      their own folders (Weather, Ocean, Movement).
-- [ ] Baseline perf table written into this file (3 camera spots).
+- [x] `src/core/settings.js`: lil-gui panel, `G` toggles it (releases
+      pointer lock so it's clickable). Folders: **Time of day** (hour
+      slider, auto cycle + day length in minutes, sunset/sunrise button =
+      N), **Graphics** (AO / bloom / god rays / fog, kept in sync with the
+      F4–F7 keys), **Performance**. Later phases add their own folders.
+- [x] `src/core/benchmark.js`: "run benchmark" visits 4 fixed spots
+      (A spawn, B overview from the west foothills, C east forest, which
+      becomes ocean in Phase 60, D north forest, which stays forest).
+      It forces a fixed state (fog off, 08:24, effects on), then restores
+      yours. It waits ≥2 s and ≥90 frames for grass, shadows and impostors
+      to settle, then measures 3 s. Records **GPU ms** (timer query, not
+      vsync-capped), **CPU ms** (JS frame cost), fps, draw calls and
+      triangles. "copy results" puts a markdown table on the clipboard.
+- [x] Verified headless (software GL): panel opens; the hour slider moves
+      the sun and the HUD clock; F7 updates the panel; the shortened
+      benchmark visits all 4 spots and restores time/fog/camera.
+- [ ] **Baseline numbers: user runs the benchmark on their machine** and
+      pastes the table below. Headless software rendering makes GPU/fps
+      numbers meaningless.
+
+Baseline (paste here):
+
+| Spot | GPU ms | CPU ms | fps | calls | tris |
+|---|---|---|---|---|---|
+| A spawn | | | | | |
+| B overview | | | | | |
+| C east forest | | | | | |
+| D north forest | | | | | |
 
 **CHECKPOINT 54:** panel opens, time slider moves the sun; baseline recorded.
+
+## Phase 54.5 — Audit quick fixes (from the 2026-11-05 code audit)
+- [ ] **Fixed-step player movement.** `movePlayer` runs every render frame,
+      but Rapier applies the kinematic target only on 60 Hz steps, so on a
+      144 Hz screen walk, sprint and jump run at ~42% (jump apex ~0.57 m
+      instead of ~1.3 m). Move the character controller into the
+      fixed-step loop and interpolate the camera. *Blocks Phase 58/59.*
+- [ ] Drop `ControlLeft` as a down key. Ctrl+W while swimming closes the
+      tab, and Ctrl+D/S open browser dialogs. C stays the "down" key.
+- [ ] Leaving fly mode inside terrain: clamp to `getHeight + capsule`.
+- [ ] Fishing bobber: ride the real wave surface (it currently uses the
+      flat level), and never sink below the ground on the beach.
+- [ ] F7 while underwater no longer replaces the underwater murk.
+- [ ] Recoil can't push the camera pitch past vertical.
+- [ ] Refresh the on-demand shadow map when the world tree loads and while
+      the crate is moving.
+- [ ] "Loading…" on the start prompt until init finishes, and show the
+      error if init fails (today you can click into a black screen).
+- [ ] Animals' hide distance follows the fog state (they pop in and out
+      when fog is off).
+- [ ] Hoist per-frame allocations (controls.js, projectiles.js,
+      fishing.js).
 
 ## Phase 55 — Arms that hold the weapons (IK rebuild)
 - [ ] Each weapon gets explicit **grip sockets**: `gripR` (pistol grip /
@@ -1806,7 +1853,9 @@ per browser and break when a weapon model changes.
 - [ ] One-handed weapons (knife, pistol) still show the support hand where
       it makes sense (pistol two-handed; knife off-hand relaxed or hidden).
 - [ ] Viewmodel lighting follows the scene's time of day (weapons currently
-      read near-black).
+      read near-black). The light direction must be converted into camera
+      space: today the world-space sun is copied in, so turning doesn't
+      change the shading and at night the light comes from below.
 - [ ] Retire the localStorage hand-pose tuner (keep H as a debug socket
       viewer only).
 
@@ -1830,6 +1879,10 @@ both hands visibly gripping, at rest and while walking or sprinting.
 - [ ] Knife swish / impact, rod cast and reel.
 - [ ] Footsteps per surface (grass, dirt, rock, sand, shallow water),
       landing thump after a jump.
+- [ ] One audio bus: ambience, birds and weapons currently use three
+      separate paths. Add master/SFX/ambience volume sliders in settings,
+      and pause audio when the game is paused. Phase 62's underwater
+      low-pass needs this bus.
 - Risk: freesound downloads need a login. If the sandbox can't fetch, the
   user downloads the chosen CC0 files and we commit them.
 
@@ -1840,9 +1893,12 @@ weapons or footsteps.
 
 ## Phase 58 — Jump, crouch, crawl
 - [ ] Jump polish: coyote time, input buffering, landing camera dip.
-- [ ] Crouch (`C` toggle / hold `Ctrl`): capsule ~1.2 m, slower walk.
-      In water `C` keeps meaning "dive". In fly mode it still means
-      "descend".
+- [ ] Crouch (`C`, hold or toggle; **not Ctrl**, see 54.5): capsule
+      ~1.2 m, slower walk. In water `C` keeps meaning "dive". In fly mode
+      it still means "descend".
+- [ ] `movePlayer` returns `{ pos, grounded, swimming, wading, landingVel }`,
+      used by the HUD, footsteps, the breath meter and stance. One
+      input/action map instead of key checks spread over six modules.
 - [ ] Prone / crawl (`Z`): capsule ~0.6 m, slow crawl, weapon lowered,
       crawl camera sway.
 - [ ] Ceiling check: you can't stand up under a log; smooth camera-height
@@ -1871,6 +1927,13 @@ stand up while under a log.
 - [ ] The deep-forest biome moves inland (north and south of the bay).
 - [ ] `getWaterLevel` returns sea level for the whole ocean; lake fish
       become sea fish.
+- [ ] **One water contract first:** a single `waterSurface(x, z, t)`
+      module. Wave constants are currently copied in 5 places, and physics
+      only adds waves when `level == LAKE_WATER_Y`. Also one set of map
+      constants: the 106 m lake clip appears in three files, and the
+      island is hard-coded in trees.js.
+- [ ] Delete dead code: the old `water.js` rendering path (~550 lines),
+      the tree pre-pass hooks, and the disabled river.
 
 **CHECKPOINT 60:** walk from the forest onto the beach and look out to an
 open horizon. Perf table should show fewer triangles.
@@ -1880,7 +1943,15 @@ open horizon. Perf table should show fewer triangles.
       `simpleWater.js` (copied in, not imported): Gerstner swell, detail
       normals, Fresnel sky reflection, sun glint, depth colour, shore foam.
 - [ ] A CPU `getWaveHeight` that matches the shader exactly, so the
-      player, the crate and the fishing bobber ride the same waves.
+      player, the crate and the fishing bobber ride the same waves. The
+      wave table lives in JS and is injected into the GLSL. Height at
+      (x, z) has to solve for Gerstner's sideways shift (2–3 fixed-point
+      steps).
+- [ ] Ocean mesh stays **opaque**, so n8ao and godrays keep working; only
+      the shoreline is dithered. Include three's tone-mapping and
+      colour-space chunks. Cap wave steepness so crests don't fold.
+- [ ] Prototype first as a new water-lab page that plots CPU-sampled
+      heights on the shader surface, then copy it in.
 - [ ] **Wave intensity** slider (calm → rough): amplitude, wavelength mix,
       choppiness, foam amount. Weather can drive it (Phase 65).
 - [ ] The ocean runs past the terrain edge to the horizon, which hides the
@@ -1895,6 +1966,9 @@ open horizon. Perf table should show fewer triangles.
 - [ ] Underwater mode: depth-tinted fog, caustics on the sea floor, light
       shafts from the surface, low-passed audio, bubbles. The weapon is
       holstered while swimming.
+- [ ] The water surface needs an underside (today it's single-sided, so
+      it vanishes from below), and the sky dome and clouds must take the
+      underwater fog.
 
 ## Phase 63 — Underwater life
 - [ ] Instanced kelp and sea grass with a sway shader, sea-floor rocks,
@@ -1926,19 +2000,28 @@ surface into waves.
 - [ ] Storm (≥ ~0.8): lightning flashes (sky + scene light), an occasional
       visible bolt, thunder delayed by distance.
 - [ ] Audio: rain loop layers from light to heavy, plus wind and thunder.
+- [ ] Fog built in one place from base + weather + underwater layers
+      (today there are three writers of `scene.fog.density`).
+- [ ] Don't free and reallocate the 8k shadow map at every sun/moon
+      handover; that causes a hitch at dusk and dawn with auto cycle on.
+- [ ] Impostors are baked once in morning light; storm and night need more
+      than the current tint.
 
 **CHECKPOINT 64–65:** drag rain from 0 to 1 and watch clear → drizzle →
 storm, with waves rising.
 
 ## Phase 66 — Perf + polish pass
 - [ ] Re-run the perf table and fix any regressions.
+- [ ] Split `main.js` (renderer/post chain, input, settings wiring, ordered
+      system list).
 - [ ] Update `games/deep-forest/README.md` controls and features.
 
 ## v6 Status
 
 | Phase | Status |
 |-------|--------|
-| 54 — Settings panel + perf baseline | planned |
+| 54 — Settings panel + perf baseline | done — awaiting user check + baseline numbers |
+| 54.5 — Audit quick fixes | planned |
 | 55 — Arms IK rebuild | planned |
 | 56 — Weapon animation | planned |
 | 57 — Sound pass | planned |
